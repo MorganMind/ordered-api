@@ -1,0 +1,1 @@
+web: gunicorn api.asgi:application --bind $PORT
