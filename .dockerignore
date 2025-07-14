@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+*.pyc
+__pycache__
+.pytest_cache
+.coverage
+htmlcov
+db.sqlite3
+.DS_Store
+.idea
+.vscode
+
+credentials.base64.txt
