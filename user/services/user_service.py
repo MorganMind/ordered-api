@@ -4,6 +4,7 @@ from datetime import datetime
 from user.services.analytics_service import AnalyticsService
 from typing import Dict, Any
 from user.models.user_settings import AvatarType, Theme
+from uuid import uuid4
 
 class UserService:
     @staticmethod
@@ -36,8 +37,28 @@ class UserService:
         response = supabase.table("user_data").select("*").eq("id", user["id"]).execute()
         
         if not response.data:  # Empty list means no user found
-            # Create analytics first
-            analytics = await AnalyticsService.create_analytics(user["id"])
+
+            analytics_id = str(uuid4())
+            
+            # Create new user data
+            user_data = UserData( 
+                id=user["id"],
+                email=user["email"],
+                created_at=datetime.utcnow(),
+                analytics_id=analytics_id,
+                onboarding_completed=False,
+                avatar_url=user['avatar_url'] if user['avatar_url'] else None,
+                full_name=user['full_name'] if user['full_name'] else None
+            )
+
+            # Save user data
+            response = supabase.table("user_data").insert(user_data.to_supabase()).execute()
+            
+            if getattr(response, 'error', None):
+                raise Exception(f"Error creating user data: {response.error}")
+
+            # Create analytics
+            analytics = await AnalyticsService.create_analytics(analytics_id, user["id"])
             
             # Create default user settings
             settings_data = {
@@ -53,33 +74,16 @@ class UserService:
             if getattr(settings_response, 'error', None):
                 print(f"Error creating user settings: {settings_response.error}")
             
-            # Create new user data
-            user_data = UserData( 
-                id=user["id"],
-                email=user["email"],
-                created_at=datetime.utcnow(),
-                analytics_id=analytics.id,
-                onboarding_completed=False,
-                avatar_url=user['avatar_url'] if user['avatar_url'] else None,
-                full_name=user['full_name'] if user['full_name'] else None
-            )
-
             # Update user metadata in Supabase auth
             supabase_admin.auth.admin.update_user_by_id(
                 user["id"],
                 {
                     "user_metadata": {
-                        "analytics_id": analytics.id
+                        "analytics_id": analytics_id
                     }
                 }
             )
-            
-            # Save user data
-            response = supabase.table("user_data").insert(user_data.to_supabase()).execute()
-            
-            if getattr(response, 'error', None):
-                raise Exception(f"Error creating user data: {response.error}")
 
             return user_data
             
-        return UserData.from_supabase(response.data[0])
+        return UserData.from_supabase(response.data[0]) 

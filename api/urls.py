@@ -25,4 +25,5 @@ urlpatterns = [
     path('api/v1/', include('files.urls')),
     path('api/v1/', include('tag.urls')),
     path('api/v1/', include('transcription.urls')), 
+    path('api/v1/', include('agent_chat_api.urls'))
 ]

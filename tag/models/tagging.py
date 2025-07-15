@@ -1,9 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from .taggable_type import TaggableType
 
 class Tagging(BaseModel):
     id: str
-    tag_id: str
+    tag_id: str = Field(description="FK:Tag:CASCADE")
     taggable_type: TaggableType
     taggable_id: str
 

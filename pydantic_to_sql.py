@@ -122,6 +122,53 @@ class PydanticToSQL:
         # Default to TEXT for unknown types
         return "TEXT"
     
+    # def extract_model_fields_from_ast(self, class_node: ast.ClassDef) -> Dict[str, Dict]:
+    #     """Extract field information directly from AST"""
+    #     fields = {}
+        
+    #     for node in class_node.body:
+    #         # Look for annotated assignments (field: type = value)
+    #         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+    #             field_name = node.target.id
+    #             sql_type = self.parse_type_annotation_from_ast(node.annotation)
+                
+    #             # Check if it's optional (has a default value)
+    #             nullable = node.value is not None
+                
+    #             # Check for Field() calls with FK descriptions
+    #             fk_description = None
+    #             if node.value and isinstance(node.value, ast.Call):
+    #                 # Check if it's a Field() call
+    #                 if (isinstance(node.value.func, ast.Name) and node.value.func.id == 'Field') or \
+    #                 (isinstance(node.value.func, ast.Attribute) and node.value.func.attr == 'Field'):
+    #                     # Look for description keyword argument
+    #                     for keyword in node.value.keywords:
+    #                         if keyword.arg == 'description' and isinstance(keyword.value, ast.Constant):
+    #                             fk_description = keyword.value.value
+    #                             break
+                
+    #             fields[field_name] = {
+    #                 'sql_type': sql_type,
+    #                 'nullable': nullable,
+    #                 'annotation_node': node.annotation,
+    #                 'fk_description': fk_description
+    #             }
+        
+    #     return fields
+
+    def extract_field_value_from_ast(self, node):
+        """Extract field information from AST node, including Field() calls"""
+        if isinstance(node, ast.Call):
+            # Check if it's a Field() call
+            if (isinstance(node.func, ast.Name) and node.func.id == 'Field') or \
+            (isinstance(node.func, ast.Attribute) and node.func.attr == 'Field'):
+                # Look for description keyword argument
+                for keyword in node.keywords:
+                    if keyword.arg == 'description':
+                        if isinstance(keyword.value, ast.Constant):
+                            return {'description': keyword.value.value}
+        return {}
+
     def extract_model_fields_from_ast(self, class_node: ast.ClassDef) -> Dict[str, Dict]:
         """Extract field information directly from AST"""
         fields = {}
@@ -135,52 +182,138 @@ class PydanticToSQL:
                 # Check if it's optional (has a default value)
                 nullable = node.value is not None
                 
-                fields[field_name] = {
+                field_info = {
                     'sql_type': sql_type,
                     'nullable': nullable,
                     'annotation_node': node.annotation
                 }
+                
+                # Extract Field() information if present
+                if node.value:
+                    field_metadata = self.extract_field_value_from_ast(node.value)
+                    if 'description' in field_metadata:
+                        field_info['description'] = field_metadata['description']
+                
+                fields[field_name] = field_info
         
         return fields
-    
+
+    # def generate_create_table_from_ast(self, model_name: str, fields: Dict[str, Dict]) -> str:
+    #     """Generate CREATE TABLE statement from AST-extracted fields"""
+    #     table_name = self.camel_to_snake(model_name)
+    #     columns = []
+        
+    #     # Always use UUID for id fields
+    #     columns.append("id UUID PRIMARY KEY DEFAULT gen_random_uuid()")
+        
+    #     # Track if we've seen timestamp fields
+    #     has_created_at = False
+    #     has_updated_at = False
+        
+    #     for field_name, field_info in fields.items():
+    #         if field_name == 'id':
+    #             continue
+                
+    #         # Track timestamp fields
+    #         if field_name == 'created_at':
+    #             has_created_at = True
+    #         elif field_name == 'updated_at':
+    #             has_updated_at = True
+            
+    #         # Check for foreign key from Field description first
+    #         fk_info = None
+    #         if field_info.get('fk_description'):
+    #             fk_info = self.parse_field_description_for_fk_from_string(field_info['fk_description'])
+            
+    #         # If no FK description, check naming convention
+    #         if not fk_info and field_name.endswith('_id'):
+    #             detected_model = self.detect_foreign_key_from_name(field_name, model_name)
+    #             if detected_model:
+    #                 fk_info = (detected_model, "CASCADE")
+            
+    #         postgres_type = field_info['sql_type']
+            
+    #         # If it's a foreign key, set type to UUID (matching target id type)
+    #         if fk_info:
+    #             postgres_type = "UUID"
+    #             # Could add logic here to check if target uses TEXT ids, but for now assume UUID
+            
+    #         null_constraint = "" if field_info.get('nullable', False) else " NOT NULL"
+    #         columns.append(f"{field_name} {postgres_type}{null_constraint}")
+            
+    #         # Store foreign key constraint
+    #         if fk_info:
+    #             target_model, on_delete = fk_info
+    #             target_table = self.camel_to_snake(target_model)
+    #             self.foreign_keys.append({
+    #                 'table': table_name,
+    #                 'column': field_name,
+    #                 'target_table': target_table,
+    #                 'target_column': 'id',
+    #                 'on_delete': on_delete
+    #             })
+        
+    #     # Add timestamps only if they don't already exist
+    #     if not has_created_at:
+    #         columns.append("created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+    #     if not has_updated_at:
+    #         columns.append("updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+        
+    #     create_statement = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+    #     {',\n    '.join(columns)}
+    # );"""
+        
+    #     trigger_statement = f"""
+    # CREATE TRIGGER update_{table_name}_updated_at BEFORE UPDATE
+    # ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
+        
+    #     return create_statement + "\n" + trigger_statement
+
+
     def generate_create_table_from_ast(self, model_name: str, fields: Dict[str, Dict]) -> str:
         """Generate CREATE TABLE statement from AST-extracted fields"""
         table_name = self.camel_to_snake(model_name)
         columns = []
         
-        # Check if model has custom id field
-        if 'id' in fields:
-            id_type = fields['id']['sql_type']
-            if id_type == "TEXT":
-                columns.append("id TEXT PRIMARY KEY")
-            else:
-                columns.append("id UUID PRIMARY KEY DEFAULT gen_random_uuid()")
-        else:
-            columns.append("id UUID PRIMARY KEY DEFAULT gen_random_uuid()")
+        # Always use UUID for id fields
+        columns.append("id UUID PRIMARY KEY DEFAULT gen_random_uuid()")
+        
+        # Track if we've seen timestamp fields
+        has_created_at = False
+        has_updated_at = False
         
         for field_name, field_info in fields.items():
             if field_name == 'id':
                 continue
+                
+            # Track timestamp fields
+            if field_name == 'created_at':
+                has_created_at = True
+            elif field_name == 'updated_at':
+                has_updated_at = True
             
-            # Check for foreign key
+            # Check for foreign key from Field description
             fk_info = None
-            if field_name.endswith('_id'):
+            if 'description' in field_info:
+                desc = field_info['description']
+                if desc.startswith("FK:"):
+                    parts = desc.split(":")
+                    if len(parts) >= 2:
+                        target_model = parts[1]
+                        on_delete = parts[2] if len(parts) > 2 else "CASCADE"
+                        fk_info = (target_model, on_delete)
+            
+            # If no FK from description, check field name convention
+            if not fk_info and field_name.endswith('_id'):
                 detected_model = self.detect_foreign_key_from_name(field_name, model_name)
                 if detected_model:
                     fk_info = (detected_model, "CASCADE")
             
             postgres_type = field_info['sql_type']
             
-            # If it's a foreign key, check if we need UUID or TEXT
+            # If it's a foreign key, ALWAYS use UUID (since all id fields are UUID)
             if fk_info:
-                # Default to UUID for foreign keys
                 postgres_type = "UUID"
-                # But check if the target model uses TEXT ids
-                target_model = fk_info[0]
-                if target_model in self.model_definitions:
-                    target_fields = self.model_definitions[target_model]
-                    if 'id' in target_fields and target_fields['id']['sql_type'] == "TEXT":
-                        postgres_type = "TEXT"
             
             null_constraint = "" if field_info.get('nullable', False) else " NOT NULL"
             columns.append(f"{field_name} {postgres_type}{null_constraint}")
@@ -197,46 +330,141 @@ class PydanticToSQL:
                     'on_delete': on_delete
                 })
         
-        # Add timestamps
-        columns.append("created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
-        columns.append("updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+        # Add timestamps only if they don't already exist
+        if not has_created_at:
+            columns.append("created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+        if not has_updated_at:
+            columns.append("updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
         
         create_statement = f"""CREATE TABLE IF NOT EXISTS {table_name} (
-    {',\n    '.join(columns)}
-);"""
+        {',\n    '.join(columns)}
+    );"""
         
         trigger_statement = f"""
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_{table_name}_updated_at BEFORE UPDATE
-ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
+    CREATE TRIGGER update_{table_name}_updated_at BEFORE UPDATE
+    ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
         
         return create_statement + "\n" + trigger_statement
-    
+
+
+    # def parse_field_description_for_fk_from_string(self, description: str) -> Optional[tuple]:
+    #     """Parse field description string for foreign key information"""
+    #     if description and description.startswith("FK:"):
+    #         parts = description.split(":")
+    #         if len(parts) >= 2:
+    #             target_model = parts[1]
+    #             on_delete = parts[2] if len(parts) > 2 else "CASCADE"
+    #             return (target_model, on_delete)
+    #     return None
+
+    # def generate_create_table(self, model_name: str, model_class: Type[BaseModel]) -> str:
+    #     """Generate CREATE TABLE statement for a successfully loaded Pydantic model"""
+    #     table_name = self.camel_to_snake(model_name)
+    #     # Always use UUID for id fields
+    #     columns = ["id UUID PRIMARY KEY DEFAULT gen_random_uuid()"]
+        
+    #     model_fields = model_class.model_fields
+        
+    #     # Track if we've seen timestamp fields
+    #     has_created_at = False
+    #     has_updated_at = False
+        
+    #     for field_name, field_info in model_fields.items():
+    #         if field_name == 'id':
+    #             continue  # Skip id field since we already added it
+                
+    #         # Track timestamp fields
+    #         if field_name == 'created_at':
+    #             has_created_at = True
+    #         elif field_name == 'updated_at':
+    #             has_updated_at = True
+            
+    #         # Try to determine field type
+    #         field_type = str  # Default
+    #         if hasattr(field_info, 'annotation'):
+    #             field_type = field_info.annotation
+            
+    #         # Check for FK description first
+    #         fk_info = self.parse_field_description_for_fk(field_info)
+            
+    #         # If no FK description, check naming convention
+    #         if not fk_info and field_name.endswith('_id'):
+    #             detected_model = self.detect_foreign_key_from_name(field_name, model_name)
+    #             if detected_model:
+    #                 fk_info = (detected_model, "CASCADE")
+            
+    #         postgres_type = self.python_type_to_postgres(field_type, field_name)
+            
+    #         # If it's a foreign key, use UUID type
+    #         if fk_info:
+    #             postgres_type = "UUID"
+            
+    #         nullable = False
+    #         if hasattr(field_info, 'is_required'):
+    #             nullable = not field_info.is_required()
+            
+    #         null_constraint = "" if nullable else " NOT NULL"
+    #         columns.append(f"{field_name} {postgres_type}{null_constraint}")
+            
+    #         if fk_info:
+    #             target_model, on_delete = fk_info
+    #             target_table = self.camel_to_snake(target_model)
+    #             self.foreign_keys.append({
+    #                 'table': table_name,
+    #                 'column': field_name,
+    #                 'target_table': target_table,
+    #                 'target_column': 'id',
+    #                 'on_delete': on_delete
+    #             })
+        
+    #     # Add timestamps only if they don't already exist
+    #     if not has_created_at:
+    #         columns.append("created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+    #     if not has_updated_at:
+    #         columns.append("updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+        
+    #     create_statement = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+    #     {',\n    '.join(columns)}
+    # );"""
+        
+    #     trigger_statement = f"""
+    # CREATE TRIGGER update_{table_name}_updated_at BEFORE UPDATE
+    # ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
+        
+    #     return create_statement + "\n" + trigger_statement
+
     def generate_create_table(self, model_name: str, model_class: Type[BaseModel]) -> str:
         """Generate CREATE TABLE statement for a successfully loaded Pydantic model"""
         table_name = self.camel_to_snake(model_name)
+        
+        # Always use UUID for id
         columns = ["id UUID PRIMARY KEY DEFAULT gen_random_uuid()"]
         
         model_fields = model_class.model_fields
         
+        # Track if we've seen timestamp fields
+        has_created_at = False
+        has_updated_at = False
+        
         for field_name, field_info in model_fields.items():
             if field_name == 'id':
                 continue
+                
+            # Track timestamp fields
+            if field_name == 'created_at':
+                has_created_at = True
+            elif field_name == 'updated_at':
+                has_updated_at = True
             
             # Try to determine field type
             field_type = str  # Default
             if hasattr(field_info, 'annotation'):
                 field_type = field_info.annotation
             
+            # Check for FK from Field description first
             fk_info = self.parse_field_description_for_fk(field_info)
             
+            # If no FK from description, check field name convention
             if not fk_info and field_name.endswith('_id'):
                 detected_model = self.detect_foreign_key_from_name(field_name, model_name)
                 if detected_model:
@@ -244,15 +472,16 @@ ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
             
             postgres_type = self.python_type_to_postgres(field_type, field_name)
             
+            # If it's a foreign key, ALWAYS use UUID (since all id fields are UUID)
+            if fk_info:
+                postgres_type = "UUID"
+            
             nullable = False
             if hasattr(field_info, 'is_required'):
                 nullable = not field_info.is_required()
             
             null_constraint = "" if nullable else " NOT NULL"
             
-            if fk_info:
-                postgres_type = "UUID"
-                
             columns.append(f"{field_name} {postgres_type}{null_constraint}")
             
             if fk_info:
@@ -266,24 +495,19 @@ ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
                     'on_delete': on_delete
                 })
         
-        columns.append("created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
-        columns.append("updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+        # Add timestamps only if they don't already exist
+        if not has_created_at:
+            columns.append("created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+        if not has_updated_at:
+            columns.append("updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
         
         create_statement = f"""CREATE TABLE IF NOT EXISTS {table_name} (
-    {',\n    '.join(columns)}
-);"""
+        {',\n    '.join(columns)}
+    );"""
         
         trigger_statement = f"""
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_{table_name}_updated_at BEFORE UPDATE
-ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
+    CREATE TRIGGER update_{table_name}_updated_at BEFORE UPDATE
+    ON {table_name} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"""
         
         return create_statement + "\n" + trigger_statement
     
@@ -445,6 +669,18 @@ ON DELETE {fk['on_delete']};"""
             return
         
         uuid_extension = "-- Enable UUID extension\nCREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
+        
+        # Create the trigger function once
+        trigger_function = """
+-- Updated at trigger function
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';"""
+        
         fk_constraints = self.generate_foreign_key_constraints()
         
         migration_sql = """-- Auto-generated PostgreSQL migrations from Pydantic models
@@ -458,10 +694,13 @@ BEGIN;
 
 {}
 
+{}
+
 COMMIT;
-""".format(
+    """.format(
             datetime.now().isoformat(),
             uuid_extension,
+            trigger_function,
             "\n\n".join(self.sql_statements),
             fk_constraints
         )

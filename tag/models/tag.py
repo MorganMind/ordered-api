@@ -5,8 +5,8 @@ from typing import Optional
 class Tag(BaseModel):
     id: str
     label: str
-    description: Optional[str] = Field(None, description="FK:UserData:CASCADE")
-    user_id: Optional[str] = None
+    description: Optional[str]
+    user_id: Optional[str] = Field(None, description="FK:UserData:CASCADE")
     auto_generated: bool = False
     last_used: Optional[datetime] = None
     is_system: bool = False

@@ -28,8 +28,7 @@ def auth_required(allow_anonymous=False):
                 return JsonResponse({'error': 'No valid authorization header'}, status=401)
             
             token = auth_header.split(' ')[1]
-            print("cock",token)
-            print("balls",os.getenv('SUPABASE_JWT_SECRET'))
+            
             try:
                 # Decode and verify the JWT token
                 decoded = jwt.decode(

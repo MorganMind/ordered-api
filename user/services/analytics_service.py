@@ -1,4 +1,3 @@
-from uuid import uuid4
 from datetime import datetime
 from common.supabase.supabase_client import get_authenticated_client, get_current_user, get_admin_client
 from user.models.user_analytics import UserAnalytics
@@ -6,12 +5,12 @@ import asyncio
 
 class AnalyticsService:
     @staticmethod
-    async def create_analytics(user_id: str) -> UserAnalytics:
+    async def create_analytics(new_id: str, user_id: str) -> UserAnalytics:
         supabase = get_admin_client()
         now = datetime.utcnow()
         
         analytics_data = {
-            "id": str(uuid4()),
+            "id": new_id,
             "user_id": user_id,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat()
