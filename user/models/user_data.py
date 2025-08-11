@@ -12,13 +12,6 @@ class UserData(BaseModel):
     analytics_id: Optional[str] = None  # Reference to their analytics data
     avatar_url: Optional[str] = None  # New field
     full_name: Optional[str] = None   # New field
-<<<<<<< HEAD
-    
-    @property
-    def has_completed_onboarding(self) -> bool:
-        return self.onboarding_completed_at is not None
-=======
->>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 
     @staticmethod
     def from_supabase(data: dict):

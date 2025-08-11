@@ -1,17 +1,9 @@
-<<<<<<< HEAD
-from pydantic import BaseModel
-=======
 from pydantic import BaseModel, Field
->>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 from datetime import datetime
 
 class UserAnalytics(BaseModel):
     id: str
-<<<<<<< HEAD
-    user_id: str
-=======
     user_id: str = Field(description="FK:UserData:CASCADE")
->>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
     total_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0

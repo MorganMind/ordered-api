@@ -91,11 +91,7 @@ INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'corsheaders',
-<<<<<<< HEAD
-    # 'knowledgebase'
-=======
     'agent_chat_api'
->>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 ]
 
 MIDDLEWARE = [

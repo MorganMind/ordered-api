@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-from pydantic import BaseModel
-=======
 from pydantic import BaseModel, Field
->>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 from enum import Enum
 
 class Theme(str, Enum):
@@ -22,11 +18,7 @@ class AvatarType(str, Enum):
             return cls.ICON
 
 class UserSettings(BaseModel):
-<<<<<<< HEAD
-    user_id: str
-=======
     user_id: str = Field(description="FK:UserData:CASCADE")
->>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
     avatar_type: AvatarType = AvatarType.UPLOAD
     theme: Theme = Theme.LIGHT
 
