@@ -1,12 +1,21 @@
+<<<<<<< HEAD
 from pydantic import BaseModel
+=======
+from pydantic import BaseModel, Field
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 from datetime import datetime
 from typing import Optional
 
 class Tag(BaseModel):
     id: str
     label: str
+<<<<<<< HEAD
     description: Optional[str] = None
     user_id: Optional[str] = None
+=======
+    description: Optional[str]
+    user_id: Optional[str] = Field(None, description="FK:UserData:CASCADE")
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
     auto_generated: bool = False
     last_used: Optional[datetime] = None
     is_system: bool = False

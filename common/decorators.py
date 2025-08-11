@@ -1,10 +1,15 @@
 from functools import wraps
+<<<<<<< HEAD
 from django.http import JsonResponse, HttpResponse
+=======
+from django.http import JsonResponse
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 import jwt
 import json
 import os
 from common.supabase.supabase_client import get_authenticated_client, set_current_user
 from common.logger.logger_service import get_logger
+<<<<<<< HEAD
 from google.auth.transport import requests
 from google.oauth2 import id_token
 import base64
@@ -12,6 +17,8 @@ from google.auth import jwt as google_jwt
 from hmac import HMAC, compare_digest
 from hashlib import sha256
 import time
+=======
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 
 logger = get_logger()
 
@@ -35,8 +42,12 @@ def auth_required(allow_anonymous=False):
                 return JsonResponse({'error': 'No valid authorization header'}, status=401)
             
             token = auth_header.split(' ')[1]
+<<<<<<< HEAD
             print("cock",token)
             print("balls",os.getenv('SUPABASE_JWT_SECRET'))
+=======
+            
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
             try:
                 # Decode and verify the JWT token
                 decoded = jwt.decode(
@@ -76,6 +87,7 @@ def auth_required(allow_anonymous=False):
                 return JsonResponse({'error': f'Invalid token: {str(e)}'}, status=401)
             
         return wrapped_view
+<<<<<<< HEAD
     return decorator
 
 def cloud_task_handler(func):
@@ -207,3 +219,6 @@ def pubsub_handler(func):
             return HttpResponse(status=500)
 
     return wrapper
+=======
+    return decorator
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b

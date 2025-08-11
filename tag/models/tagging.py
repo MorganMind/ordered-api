@@ -1,9 +1,17 @@
+<<<<<<< HEAD
 from pydantic import BaseModel
+=======
+from pydantic import BaseModel, Field
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 from .taggable_type import TaggableType
 
 class Tagging(BaseModel):
     id: str
+<<<<<<< HEAD
     tag_id: str
+=======
+    tag_id: str = Field(description="FK:Tag:CASCADE")
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
     taggable_type: TaggableType
     taggable_id: str
 

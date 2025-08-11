@@ -23,6 +23,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('user.urls')),
     path('api/v1/', include('files.urls')),
+<<<<<<< HEAD
     path('api/v1/', include('invite.urls')),
     path('api/v1/', include('tag.urls')),
     path('api/v1/', include('transcription.urls')),
@@ -31,4 +32,9 @@ urlpatterns = [
     # Non-API Routes
     path('tasks/', include('tasks.urls')),
     # path('knowledgebase/', include('knowledgebase.urls.pubsub_urls')),  
+=======
+    path('api/v1/', include('tag.urls')),
+    path('api/v1/', include('transcription.urls')), 
+    path('api/v1/', include('agent_chat_api.urls'))
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 ]

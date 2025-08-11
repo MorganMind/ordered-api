@@ -2,9 +2,15 @@ from common.supabase.supabase_client import get_authenticated_client, get_curren
 from user.models.user_data import UserData
 from datetime import datetime
 from user.services.analytics_service import AnalyticsService
+<<<<<<< HEAD
 from user.models.onboarding_payload import OnboardingPayload
 from typing import Dict, Any
 from user.models.user_settings import AvatarType, Theme
+=======
+from typing import Dict, Any
+from user.models.user_settings import AvatarType, Theme
+from uuid import uuid4
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
 
 class UserService:
     @staticmethod
@@ -37,8 +43,33 @@ class UserService:
         response = supabase.table("user_data").select("*").eq("id", user["id"]).execute()
         
         if not response.data:  # Empty list means no user found
+<<<<<<< HEAD
             # Create analytics first
             analytics = await AnalyticsService.create_analytics(user["id"])
+=======
+
+            analytics_id = str(uuid4())
+            
+            # Create new user data
+            user_data = UserData( 
+                id=user["id"],
+                email=user["email"],
+                created_at=datetime.utcnow(),
+                analytics_id=analytics_id,
+                onboarding_completed=False,
+                avatar_url=user['avatar_url'] if user['avatar_url'] else None,
+                full_name=user['full_name'] if user['full_name'] else None
+            )
+
+            # Save user data
+            response = supabase.table("user_data").insert(user_data.to_supabase()).execute()
+            
+            if getattr(response, 'error', None):
+                raise Exception(f"Error creating user data: {response.error}")
+
+            # Create analytics
+            analytics = await AnalyticsService.create_analytics(analytics_id, user["id"])
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
             
             # Create default user settings
             settings_data = {
@@ -54,6 +85,7 @@ class UserService:
             if getattr(settings_response, 'error', None):
                 print(f"Error creating user settings: {settings_response.error}")
             
+<<<<<<< HEAD
             # Create new user data
             user_data = UserData( 
                 id=user["id"],
@@ -65,11 +97,14 @@ class UserService:
                 full_name=user['full_name'] if user['full_name'] else None
             )
 
+=======
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
             # Update user metadata in Supabase auth
             supabase_admin.auth.admin.update_user_by_id(
                 user["id"],
                 {
                     "user_metadata": {
+<<<<<<< HEAD
                         "analytics_id": analytics.id
                     }
                 }
@@ -122,3 +157,13 @@ async def complete_onboarding(payload: OnboardingPayload) -> UserData:
         #     cleanup_tasks = [AgentService.delete_agent(agent.id) for agent in user_agents]
         #     await asyncio.gather(*cleanup_tasks, return_exceptions=True)
         raise Exception(f"Error completing onboarding: {str(e)}")
+=======
+                        "analytics_id": analytics_id
+                    }
+                }
+            )
+
+            return user_data
+            
+        return UserData.from_supabase(response.data[0]) 
+>>>>>>> 841269cafde83fe6014a93f44959c790b8e0a23b
