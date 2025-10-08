@@ -1,5 +1,5 @@
 """
-URL configuration for api project.
+URL configuration for iact_api project.
 
 The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/5.1/topics/http/urls/
@@ -24,6 +24,6 @@ urlpatterns = [
     path('api/v1/', include('user.urls')),
     path('api/v1/', include('files.urls')),
     path('api/v1/', include('tag.urls')),
-    path('api/v1/', include('transcription.urls')), 
+    path('api/v1/', include('transcription.urls')),
     path('api/v1/', include('agent_chat_api.urls'))
 ]

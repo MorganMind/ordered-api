@@ -1,1 +1,1 @@
-web: gunicorn api.asgi:application --bind $PORT
+web: gunicorn iact_api.asgi:application --bind $PORT

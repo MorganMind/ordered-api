@@ -23,4 +23,4 @@ COPY . .
 EXPOSE $PORT
 
 # Run the application
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 api.asgi:application -k uvicorn.workers.UvicornWorker
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 iact_api.asgi:application -k uvicorn.workers.UvicornWorker
