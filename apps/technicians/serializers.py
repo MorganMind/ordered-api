@@ -1,6 +1,8 @@
 """
 Technician serializers for onboarding and profile management.
 """
+import re
+
 from rest_framework import serializers
 
 from apps.jobs.models import Skill
@@ -8,12 +10,15 @@ from apps.technicians.models import (
     ApplicantType,
     ApplicationForm,
     ApplicationStatus,
+    FormField,
+    FormFieldType,
     OnboardingStatus,
     ServiceRegion,
     TechnicianApplication,
     TechnicianProfile,
     ONBOARDING_REQUIREMENTS,
 )
+from apps.technicians.validators import validate_answers_against_schema
 
 
 class ServiceRegionSerializer(serializers.ModelSerializer):
@@ -414,11 +419,118 @@ class OnboardingRequirementsSerializer(serializers.Serializer):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+class FormFieldSerializer(serializers.ModelSerializer):
+    """Read/write serializer for a single form field (nested under application forms)."""
+
+    id = serializers.UUIDField(required=False)
+
+    class Meta:
+        model = FormField
+        fields = [
+            "id",
+            "field_key",
+            "label",
+            "description",
+            "field_type",
+            "required",
+            "position",
+            "options",
+            "validations",
+            "default_value",
+            "placeholder",
+            "visible",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate_field_key(self, value):
+        if not value:
+            raise serializers.ValidationError("field_key is required.")
+        if not re.match(r"^[a-z][a-z0-9_]*$", value):
+            raise serializers.ValidationError(
+                "field_key must start with a lowercase letter and contain "
+                "only lowercase letters, digits, and underscores."
+            )
+        return value
+
+    def validate_options(self, value):
+        if not value:
+            return value
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Options must be a list.")
+        normalised = []
+        for item in value:
+            if isinstance(item, str):
+                normalised.append({"label": item, "value": item})
+            elif isinstance(item, dict):
+                if "value" not in item:
+                    raise serializers.ValidationError(
+                        "Each option dict must have a 'value' key."
+                    )
+                if "label" not in item:
+                    item = {**item, "label": item["value"]}
+                normalised.append(item)
+            else:
+                raise serializers.ValidationError(
+                    "Each option must be a string or a dict with 'label' and 'value'."
+                )
+        return normalised
+
+    def validate(self, attrs):
+        field_type = attrs.get(
+            "field_type",
+            getattr(self.instance, "field_type", FormFieldType.TEXT),
+        )
+        options = attrs.get("options", getattr(self.instance, "options", []))
+        choice_types = {
+            FormFieldType.SELECT,
+            FormFieldType.MULTI_SELECT,
+            FormFieldType.RADIO,
+        }
+        if field_type in choice_types and not options:
+            raise serializers.ValidationError(
+                {
+                    "options": (
+                        f"At least one option is required for field type "
+                        f"'{field_type}'."
+                    )
+                }
+            )
+        return attrs
+
+
+class FormFieldCompactSerializer(serializers.ModelSerializer):
+    """Read-only compact representation for list views."""
+
+    class Meta:
+        model = FormField
+        fields = [
+            "id",
+            "field_key",
+            "label",
+            "field_type",
+            "required",
+            "position",
+            "visible",
+        ]
+        read_only_fields = [
+            "id",
+            "field_key",
+            "label",
+            "field_type",
+            "required",
+            "position",
+            "visible",
+        ]
+
+
 class ApplicationFormListSerializer(serializers.ModelSerializer):
     """Compact representation for list views."""
 
     application_count = serializers.SerializerMethodField()
     is_accepting_submissions = serializers.BooleanField(read_only=True)
+    field_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ApplicationForm
@@ -430,6 +542,7 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
             "status",
             "is_accepting_submissions",
             "application_count",
+            "field_count",
             "created_at",
             "updated_at",
         ]
@@ -437,6 +550,7 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
             "id",
             "is_accepting_submissions",
             "application_count",
+            "field_count",
             "created_at",
             "updated_at",
         ]
@@ -444,8 +558,6 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
     def get_application_count(self, obj) -> int:
         if hasattr(obj, "_application_count"):
             return obj._application_count
-        # Avoid annotate/subquery SQL (fragile on some Postgres schemas); COUNT
-        # by FK does not JOIN users_user.
         from django.db import DatabaseError
 
         try:
@@ -455,13 +567,20 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
         except DatabaseError:
             return 0
 
+    def get_field_count(self, obj) -> int:
+        if hasattr(obj, "_field_count"):
+            return obj._field_count
+        return obj.fields.count()
+
 
 class ApplicationFormDetailSerializer(serializers.ModelSerializer):
-    """Full detail serializer for a single application form."""
+    """Full detail serializer including nested fields."""
 
     application_count = serializers.SerializerMethodField()
     is_accepting_submissions = serializers.BooleanField(read_only=True)
     status_counts = serializers.SerializerMethodField()
+    fields_schema = FormFieldSerializer(source="fields", many=True, read_only=True)
+    schema_version = serializers.SerializerMethodField()
 
     class Meta:
         model = ApplicationForm
@@ -475,6 +594,8 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
             "is_accepting_submissions",
             "application_count",
             "status_counts",
+            "fields_schema",
+            "schema_version",
             "created_at",
             "updated_at",
         ]
@@ -483,6 +604,8 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
             "is_accepting_submissions",
             "application_count",
             "status_counts",
+            "fields_schema",
+            "schema_version",
             "created_at",
             "updated_at",
         ]
@@ -496,9 +619,14 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
         qs = obj.applications.values("status").annotate(count=Count("id"))
         return {row["status"]: row["count"] for row in qs}
 
+    def get_schema_version(self, obj) -> int:
+        return obj.schema_version_current
+
 
 class ApplicationFormCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating a new application form."""
+    """Create application form; optional ``fields_schema`` creates fields atomically."""
+
+    fields_schema = FormFieldSerializer(many=True, required=False, default=list)
 
     class Meta:
         model = ApplicationForm
@@ -509,6 +637,7 @@ class ApplicationFormCreateSerializer(serializers.ModelSerializer):
             "description",
             "status",
             "settings",
+            "fields_schema",
             "created_at",
             "updated_at",
         ]
@@ -528,9 +657,46 @@ class ApplicationFormCreateSerializer(serializers.ModelSerializer):
                 )
         return value
 
+    def validate_fields_schema(self, value):
+        if not value:
+            return value
+        keys = [f.get("field_key") or "" for f in value]
+        seen: set[str] = set()
+        dupes: set[str] = set()
+        for k in keys:
+            if not k:
+                continue
+            if k in seen:
+                dupes.add(k)
+            seen.add(k)
+        if dupes:
+            raise serializers.ValidationError(
+                f"Duplicate field_key(s): {', '.join(sorted(dupes))}"
+            )
+        return value
+
+    def create(self, validated_data):
+        fields_data = validated_data.pop("fields_schema", [])
+        form = ApplicationForm.objects.create(**validated_data)
+
+        for idx, field_data in enumerate(fields_data):
+            field_data = {**field_data}
+            field_data.pop("id", None)
+            if "position" not in field_data:
+                field_data["position"] = idx
+            FormField.objects.create(form=form, **field_data)
+
+        return form
+
 
 class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating an existing application form."""
+    """
+    Update application form. When ``fields_schema`` is sent, reconcile fields
+    (create / update / delete). With existing submissions, field_key renames
+    and removals are blocked.
+    """
+
+    fields_schema = FormFieldSerializer(many=True, required=False)
 
     class Meta:
         model = ApplicationForm
@@ -540,6 +706,7 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
             "description",
             "status",
             "settings",
+            "fields_schema",
         ]
 
     def validate_slug(self, value):
@@ -557,6 +724,116 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
                     f"A form with slug '{value}' already exists for this tenant."
                 )
         return value
+
+    def validate_fields_schema(self, value):
+        if value is None:
+            return value
+        keys = [f.get("field_key") or "" for f in value]
+        seen: set[str] = set()
+        dupes: set[str] = set()
+        for k in keys:
+            if not k:
+                continue
+            if k in seen:
+                dupes.add(k)
+            seen.add(k)
+        if dupes:
+            raise serializers.ValidationError(
+                f"Duplicate field_key(s): {', '.join(sorted(dupes))}"
+            )
+        return value
+
+    def _validate_field_key_stability(self, instance, fields_data):
+        if not instance.applications.exists():
+            return
+
+        existing_fields = {str(f.id): f.field_key for f in instance.fields.all()}
+        existing_keys = set(existing_fields.values())
+        incoming_keys = {f.get("field_key", "") for f in fields_data if f.get("field_key")}
+
+        removed_keys = existing_keys - incoming_keys
+        if removed_keys:
+            raise serializers.ValidationError(
+                {
+                    "fields_schema": (
+                        f"Cannot remove fields that may have answers: "
+                        f"{', '.join(sorted(removed_keys))}. "
+                        f"Set visible=false to hide them instead."
+                    )
+                }
+            )
+
+        for field_data in fields_data:
+            fid = field_data.get("id")
+            if fid and str(fid) in existing_fields:
+                old_key = existing_fields[str(fid)]
+                new_key = field_data.get("field_key", old_key)
+                if new_key != old_key:
+                    raise serializers.ValidationError(
+                        {
+                            "fields_schema": (
+                                f"Cannot rename field_key '{old_key}' → '{new_key}' "
+                                f"on a form with existing submissions."
+                            )
+                        }
+                    )
+
+    def update(self, instance, validated_data):
+        fields_data = validated_data.pop("fields_schema", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if fields_data is not None:
+            self._validate_field_key_stability(instance, fields_data)
+            self._reconcile_fields(instance, fields_data)
+
+        return instance
+
+    def _reconcile_fields(self, form, fields_data):
+        existing_by_id = {str(f.id): f for f in form.fields.all()}
+        incoming_ids: set[str] = set()
+
+        for idx, raw in enumerate(fields_data):
+            field_data = {**raw}
+            fid = field_data.pop("id", None)
+
+            if "position" not in field_data:
+                field_data["position"] = idx
+
+            if fid and str(fid) in existing_by_id:
+                incoming_ids.add(str(fid))
+                field_obj = existing_by_id[str(fid)]
+                for attr, value in field_data.items():
+                    setattr(field_obj, attr, value)
+                field_obj.save()
+            else:
+                new_field = FormField.objects.create(form=form, **field_data)
+                incoming_ids.add(str(new_field.id))
+
+        to_delete = set(existing_by_id.keys()) - incoming_ids
+        if to_delete:
+            FormField.objects.filter(id__in=to_delete).delete()
+
+
+class ApplicationFormPublicSerializer(serializers.ModelSerializer):
+    """Public read-only form definition for rendering the applicant form."""
+
+    fields_schema = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ApplicationForm
+        fields = [
+            "id",
+            "title",
+            "description",
+            "fields_schema",
+        ]
+        read_only_fields = ["id", "title", "description", "fields_schema"]
+
+    def get_fields_schema(self, obj) -> list[dict]:
+        return obj.get_field_schema()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -727,6 +1004,25 @@ class TechnicianApplicationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"company_name": "Required when applicant_type is 'company'."}
                 )
+
+        form = attrs.get("application_form")
+        if form is None and self.instance is not None:
+            form = self.instance.application_form
+
+        if form and hasattr(form, "get_field_schema"):
+            field_schema = form.get_field_schema()
+            if field_schema:
+                if self.partial and "answers" not in attrs:
+                    return attrs
+                answers = attrs.get("answers")
+                if answers is None and self.instance is not None:
+                    answers = self.instance.answers or {}
+                elif answers is None:
+                    answers = {}
+                errors = validate_answers_against_schema(field_schema, answers)
+                if errors:
+                    raise serializers.ValidationError({"answers": errors})
+
         return attrs
 
 
@@ -917,5 +1213,17 @@ class TechnicianApplicationPublicSubmitSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"first_name": "First name is required."}
             )
+
+        form = self.context.get("application_form")
+        answers = attrs.get("answers")
+        if answers is None:
+            answers = {}
+
+        if form and hasattr(form, "get_field_schema"):
+            field_schema = form.get_field_schema()
+            if field_schema:
+                errors = validate_answers_against_schema(field_schema, answers)
+                if errors:
+                    raise serializers.ValidationError({"answers": errors})
 
         return attrs

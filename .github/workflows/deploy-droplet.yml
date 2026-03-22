@@ -14,6 +14,7 @@ on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +35,8 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DROPLET_DEPLOY_PATH }}"
-            git fetch origin main
-            git reset --hard origin/main
+            BRANCH="${{ github.ref_name }}"
+            git fetch origin "$BRANCH"
+            git reset --hard "origin/$BRANCH"
             docker compose -f deploy/docker-compose.droplet.yml up -d --build
             docker compose -f deploy/docker-compose.droplet.yml run --rm web python manage.py migrate --noinput

@@ -391,6 +391,23 @@ class ApplicationFormStatus(models.TextChoices):
     ARCHIVED = "archived", "Archived"
 
 
+class FormFieldType(models.TextChoices):
+    """Supported field types for custom application form fields."""
+
+    TEXT = "text", "Text"
+    TEXTAREA = "textarea", "Text Area"
+    EMAIL = "email", "Email"
+    PHONE = "phone", "Phone"
+    NUMBER = "number", "Number"
+    CHECKBOX = "checkbox", "Checkbox"
+    SELECT = "select", "Single Select (Dropdown)"
+    MULTI_SELECT = "multi_select", "Multi Select"
+    RADIO = "radio", "Radio Buttons"
+    DATE = "date", "Date"
+    URL = "url", "URL"
+    FILE_UPLOAD = "file_upload", "File Upload"
+
+
 class ApplicationForm(models.Model):
     """
     A tenant-scoped application form definition.
@@ -398,9 +415,9 @@ class ApplicationForm(models.Model):
     Each tenant can create multiple forms (e.g. "Summer 2025 Hiring",
     "Experienced Cleaners Only", "Company/Team Application").
 
-    For now every form uses the same built-in field set (the columns on
-    TechnicianApplication). In a future phase, a `fields` JSONB column
-    will allow per-form field customization.
+    Custom questions are defined as related ``FormField`` rows; built-in
+    columns on ``TechnicianApplication`` cover core identity and structured
+    blocks (service area, availability, etc.).
 
     Public submissions target a specific form via its ID, which resolves
     the owning tenant automatically.
@@ -470,6 +487,186 @@ class ApplicationForm(models.Model):
     @property
     def is_accepting_submissions(self) -> bool:
         return self.status == ApplicationFormStatus.ACTIVE
+
+    @property
+    def schema_version_current(self) -> int:
+        """
+        Schema version derived from visible field definitions.
+
+        Submissions record whichever version was current at submit time so
+        answers can be interpreted retroactively.
+        """
+        import hashlib
+
+        fields_qs = self.fields.order_by("position", "created_at").values_list(
+            "field_key", "field_type", "required", "options", "validations"
+        )
+        raw = "|".join(
+            f"{fk}:{ft}:{rq}:{opts}:{vals}" for fk, ft, rq, opts, vals in fields_qs
+        )
+        digest = hashlib.sha1(raw.encode()).hexdigest()[:8]
+        return int(digest, 16) % (10**9)
+
+    def get_field_schema(self) -> list[dict]:
+        """
+        Ordered list of visible field definitions as plain dicts for rendering
+        and for validating ``TechnicianApplication.answers``.
+        """
+        fields = self.fields.filter(visible=True).order_by("position", "created_at")
+        return [
+            {
+                "field_key": f.field_key,
+                "label": f.label,
+                "description": f.description,
+                "field_type": f.field_type,
+                "required": f.required,
+                "position": f.position,
+                "options": f.options,
+                "validations": f.validations,
+                "default_value": f.default_value,
+                "placeholder": f.placeholder,
+            }
+            for f in fields
+        ]
+
+
+class FormField(models.Model):
+    """
+    A single field definition belonging to an ApplicationForm.
+
+    Field identity:
+      - ``field_key`` is an immutable, slug-like identifier used as the key in
+        ``TechnicianApplication.answers``. Once submissions exist against a form
+        it must not change (enforced in ``ApplicationFormUpdateSerializer``).
+      - ``label`` is the human-readable prompt shown to the applicant.
+
+    Options (for select / multi_select / radio):
+      Stored in ``options`` as a list of dicts:
+        [{"label": "Deep Clean", "value": "deep_clean"}, ...]
+      Plain string lists are accepted and normalised in the API serializer.
+
+    Validations JSONB soft schema:
+        {
+            "min_length": int,
+            "max_length": int,
+            "min_value": number,
+            "max_value": number,
+            "pattern": str,
+            "pattern_message": str,
+            "min_selections": int,
+            "max_selections": int,
+            "allowed_extensions": [".pdf", ".jpg"],
+            "max_file_size_mb": int,
+        }
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    form = models.ForeignKey(
+        "technicians.ApplicationForm",
+        on_delete=models.CASCADE,
+        related_name="fields",
+        db_index=True,
+    )
+
+    field_key = models.SlugField(
+        max_length=120,
+        help_text=(
+            "Stable machine key used in answers JSON. "
+            "Must be unique within the form and must not change after first submission."
+        ),
+    )
+
+    label = models.CharField(
+        max_length=255,
+        help_text="Human-readable field label shown to the applicant.",
+    )
+
+    description = models.TextField(
+        blank=True,
+        help_text="Optional helper text displayed below the label.",
+    )
+
+    field_type = models.CharField(
+        max_length=30,
+        choices=FormFieldType.choices,
+        default=FormFieldType.TEXT,
+    )
+
+    required = models.BooleanField(
+        default=False,
+        help_text="Whether this field must be filled in for a valid submission.",
+    )
+
+    position = models.PositiveIntegerField(
+        default=0,
+        help_text="Sort order within the form (ascending).",
+        db_index=True,
+    )
+
+    options = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            'Choices for select / multi_select / radio. '
+            'List of {"label": "...", "value": "..."} dicts.'
+        ),
+    )
+
+    validations = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Field-level validation rules. See model docstring for schema.",
+    )
+
+    default_value = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Optional default value pre-filled for the applicant.",
+    )
+
+    placeholder = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Placeholder text for text-like inputs.",
+    )
+
+    visible = models.BooleanField(
+        default=True,
+        help_text="If False the field is hidden from the public form but kept in schema.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "application_form_fields"
+        ordering = ["position", "created_at"]
+        indexes = [
+            models.Index(fields=["form", "position"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["form", "field_key"],
+                name="unique_field_key_per_form",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.field_key} ({self.get_field_type_display()})"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        choice_types = {
+            FormFieldType.SELECT,
+            FormFieldType.MULTI_SELECT,
+            FormFieldType.RADIO,
+        }
+        if self.field_type in choice_types and not self.options:
+            raise DjangoValidationError(
+                {"options": f"Options are required for field type '{self.field_type}'."}
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

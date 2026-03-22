@@ -41,6 +41,7 @@ from apps.technicians.serializers import (
     ApplicationFormCreateSerializer,
     ApplicationFormDetailSerializer,
     ApplicationFormListSerializer,
+    ApplicationFormPublicSerializer,
     ApplicationFormUpdateSerializer,
     ConversionResultSerializer,
     OnboardingRequirementsSerializer,
@@ -512,7 +513,12 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
         if not tenant_id:
             return ApplicationForm.objects.none()
 
-        return ApplicationForm.objects.filter(tenant_id=tenant_id)
+        qs = ApplicationForm.objects.filter(tenant_id=tenant_id)
+
+        if self.action in ("retrieve", "update", "partial_update"):
+            qs = qs.prefetch_related("fields")
+
+        return qs
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -553,6 +559,7 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
             tenant_id=str(tenant_id),
             title=serializer.instance.title,
             created_by=str(self.request.user.id),
+            field_count=serializer.instance.fields.count(),
         )
 
     def perform_destroy(self, instance):
@@ -1032,17 +1039,17 @@ class TechnicianApplicationPublicSubmitView(APIView):
 
 class ApplicationFormPublicSubmitView(APIView):
     """
-    POST /api/v1/forms/{form_id}/apply/
+    GET /api/v1/forms/{form_id}/apply/ — public form schema (no auth).
 
-    Public apply against a specific ApplicationForm; tenant comes from the form.
+    POST /api/v1/forms/{form_id}/apply/ — submit against the form; tenant from form.
     """
 
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    def post(self, request, form_id):
+    def get(self, request, form_id):
         try:
-            form = ApplicationForm.objects.select_related("tenant").get(id=form_id)
+            form = ApplicationForm.objects.prefetch_related("fields").get(id=form_id)
         except ApplicationForm.DoesNotExist:
             return Response(
                 {
@@ -1080,7 +1087,58 @@ class ApplicationFormPublicSubmitView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        serializer = TechnicianApplicationPublicSubmitSerializer(data=request.data)
+        serializer = ApplicationFormPublicSerializer(form)
+        return Response(serializer.data)
+
+    def post(self, request, form_id):
+        try:
+            form = ApplicationForm.objects.select_related("tenant").prefetch_related(
+                "fields"
+            ).get(id=form_id)
+        except ApplicationForm.DoesNotExist:
+            return Response(
+                {
+                    "error": {
+                        "code": "form_not_found",
+                        "message": "Application form not found.",
+                    }
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not form.is_accepting_submissions:
+            return Response(
+                {
+                    "error": {
+                        "code": "form_not_active",
+                        "message": (
+                            "This application form is not currently accepting "
+                            "submissions."
+                        ),
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tenant = form.tenant
+        if not tenant.is_active:
+            return Response(
+                {
+                    "error": {
+                        "code": "tenant_inactive",
+                        "message": "This organization is not currently active.",
+                    }
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = TechnicianApplicationPublicSubmitSerializer(
+            data=request.data,
+            context={
+                "application_form": form,
+                "tenant_id": tenant.id,
+            },
+        )
         serializer.is_valid(raise_exception=True)
 
         now = timezone.now()
@@ -1114,18 +1172,23 @@ class ApplicationFormPublicSubmitView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        schema_version = form.schema_version_current
+
         application = serializer.save(
             tenant=tenant,
             application_form=form,
             status=ApplicationStatus.NEW,
             source="public_form",
             submitted_at=now,
+            schema_version=schema_version,
             metadata={
                 "ip_address": request.META.get("REMOTE_ADDR"),
                 "user_agent": (request.META.get("HTTP_USER_AGENT", "") or "")[:500],
                 "submitted_via": "public_api",
                 "form_id": str(form.id),
                 "form_title": form.title,
+                "schema_version": schema_version,
+                "field_schema_snapshot": form.get_field_schema(),
             },
         )
 
@@ -1136,6 +1199,7 @@ class ApplicationFormPublicSubmitView(APIView):
             form_id=str(form.id),
             email=application.email,
             source="public_form",
+            schema_version=schema_version,
         )
 
         confirmation_message = (form.settings or {}).get(

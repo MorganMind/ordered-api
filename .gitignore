@@ -16,3 +16,7 @@ staticfiles/
 .idea/
 .vscode/
 *.log
+
+# Local SSH keypairs for GitHub Actions → droplet (never commit)
+gha-ordered-api-deploy
+gha-ordered-api-deploy.pub
