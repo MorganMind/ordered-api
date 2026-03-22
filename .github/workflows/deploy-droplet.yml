@@ -1,0 +1,40 @@
+# Deploy to a DigitalOcean droplet over SSH (Docker Compose).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DROPLET_HOST       — droplet IP or DNS name
+#   DROPLET_USER       — SSH user (e.g. root, deploy)
+#   DROPLET_SSH_KEY    — private key (full PEM, including BEGIN/END lines)
+#   DROPLET_DEPLOY_PATH — absolute path to the clone on the server (e.g. /home/deploy/ordered-api)
+#
+# The droplet must already have: Docker, this repo cloned, and a production .env (not in git).
+
+name: Deploy to droplet
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-droplet
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull, rebuild, migrate
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DROPLET_DEPLOY_PATH }}"
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose -f deploy/docker-compose.droplet.yml up -d --build
+            docker compose -f deploy/docker-compose.droplet.yml run --rm web python manage.py migrate --noinput

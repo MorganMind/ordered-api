@@ -1,11 +1,11 @@
 steps:
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/morgan-api:$COMMIT_SHA', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ordered-api:$COMMIT_SHA', '.']
   
   # Push the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/morgan-api:$COMMIT_SHA']
+    args: ['push', 'gcr.io/$PROJECT_ID/ordered-api:$COMMIT_SHA']
   
   # Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -13,9 +13,9 @@ steps:
     args:
     - 'run'
     - 'deploy'
-    - 'morgan-api'
+    - 'ordered-api'
     - '--image'
-    - 'gcr.io/$PROJECT_ID/morgan-api:$COMMIT_SHA'
+    - 'gcr.io/$PROJECT_ID/ordered-api:$COMMIT_SHA'
     - '--service-account'
     - '754882757416-compute@developer.gserviceaccount.com'
     - '--region'
@@ -24,6 +24,6 @@ steps:
     - 'managed'
     - '--allow-unauthenticated'
 images:
-  - 'gcr.io/$PROJECT_ID/morgan-api:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/ordered-api:$COMMIT_SHA'
 options:
   logging: CLOUD_LOGGING_ONLY

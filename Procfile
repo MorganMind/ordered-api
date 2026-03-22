@@ -1,1 +1,1 @@
-web: gunicorn iact_api.asgi:application --bind $PORT
+web: gunicorn ordered_api.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000}

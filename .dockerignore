@@ -1,11 +1,15 @@
 .git
 .gitignore
 .env
+.env.staging
+venv
+.venv
 *.pyc
 __pycache__
 .pytest_cache
 .coverage
 htmlcov
+staticfiles
 db.sqlite3
 .DS_Store
 .idea

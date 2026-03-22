@@ -12,8 +12,12 @@ def get_logger():
     if current_logger is not None:
         return current_logger
     
-    # Initialize new logger
-    logfire.configure(token=settings.LOGFIRE_TOKEN)
+    # Initialize new logger (local/dev: no token → console-only, no Logfire cloud auth)
+    token = getattr(settings, "LOGFIRE_TOKEN", None)
+    if token:
+        logfire.configure(token=token)
+    else:
+        logfire.configure(send_to_logfire=False)
     logger.set(logfire)
     return logfire
 

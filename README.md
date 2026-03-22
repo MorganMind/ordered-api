@@ -1,4 +1,4 @@
-## iact-api — Backend Structure Overview
+## ordered-api — Backend structure overview
 
 A Django-based backend organized by domains ("apps") with clear separation between HTTP views, services, models, and integrations.
 
@@ -23,9 +23,10 @@ A Django-based backend organized by domains ("apps") with clear separation betwe
   - `manage.py`: Django management entrypoint
   - `requirements.txt`: Python dependencies
   - `Dockerfile`, `Procfile`, `cloudbuild.yaml`: Container and deployment config
+  - `deploy/`: DigitalOcean droplet (VPS) runbook, sample `docker-compose`, nginx config
   - `migrations.sql`, `pydantic_to_sql.py`: SQL migrations/pydantic tooling
 - **Project config**
-  - `iact_api/`: Django project module (settings, ASGI/WSGI, root `urls.py`)
+  - `ordered_api/`: Django project package (settings, ASGI/WSGI, root `urls.py`)
 - **Shared libraries**
   - `common/`: Cross-cutting utilities
     - `auth_routes.py`, `decorators.py`
@@ -70,7 +71,7 @@ A Django-based backend organized by domains ("apps") with clear separation betwe
 ### Architectural Conventions
 
 - **App structure**: Each domain app keeps `views/` (HTTP endpoints), `services/` (business logic), `models/` (pydantic/dataclasses or ORM), and `urls.py`.
-- **Routing**: The project-level `iact_api/urls.py` aggregates each app’s `urls.py`.
+- **Routing**: The project-level `ordered_api/urls.py` aggregates each app’s `urls.py`.
 - **Services-first**: Views are thin; core logic lives in `services/` for testability.
 - **Events/Tasks**: Domain events flow via `common/events`, async work via `common/task_queue` and app `tasks/`.
 - **Integrations**: External clients are wrapped in `common/google/*` and `common/supabase/*`.
@@ -85,7 +86,7 @@ A Django-based backend organized by domains ("apps") with clear separation betwe
    pip install -r requirements.txt
    ```
 
-2. Set required environment variables (DB, secrets, GCP, Supabase). Ensure `DJANGO_SETTINGS_MODULE=iact_api.settings`.
+2. Set required environment variables (DB, secrets, GCP, Supabase). Ensure `DJANGO_SETTINGS_MODULE=ordered_api.settings`.
 
 3. Run the server:
 
@@ -97,7 +98,7 @@ A Django-based backend organized by domains ("apps") with clear separation betwe
 
 ### Notes
 
-- The legacy `api/` module is being replaced by `iact_api/` (see git status). Ensure the new settings module is used in local and deploy environments.
+- Use `ordered_api` as the Django settings package (`DJANGO_SETTINGS_MODULE=ordered_api.settings`).
 
 ## Stripe Integration
 
@@ -386,5 +387,109 @@ flutter run -t lib/main_production.dart
   2) Frontend implements UI/state/navigation and calls to existing or stubbed APIs.
   3) If backend changes are needed, list them explicitly under “Backend needs to handle”.
 
+---
 
+## Application forms — backend reference (custom form builder)
+
+### Existing files (edit / reference)
+
+- `ordered_api/settings.py` (`INSTALLED_APPS`: `apps.technicians`)
+- `ordered_api/urls.py` (`path("api/v1/", include("apps.technicians.urls"))`)
+- `apps/core/middleware.py` (`get_current_tenant_id`)
+- `apps/core/permissions.py` (`IsAdmin`, `IsTechnician`)
+- `apps/technicians/__init__.py`
+- `apps/technicians/apps.py`
+- `apps/technicians/models.py` (`ApplicationForm`, `ApplicationFormStatus`, `TechnicianApplication`, `ApplicantType`, `ApplicationStatus`, `APPLICATION_TERMINAL_STATUSES`, `TechnicianProfile`, `ONBOARDING_REQUIREMENTS`, `ServiceRegion`, …)
+- `apps/technicians/serializers.py` (`ApplicationFormListSerializer`, `ApplicationFormDetailSerializer`, `ApplicationFormCreateSerializer`, `ApplicationFormUpdateSerializer`, `TechnicianApplicationListSerializer`, `TechnicianApplicationSerializer`, `TechnicianApplicationReviewSerializer`, `TechnicianApplicationApproveSerializer`, `TechnicianApplicationRejectSerializer`, `TechnicianApplicationConvertSerializer`, `ConversionResultSerializer`, `TechnicianApplicationPublicSubmitSerializer`, …)
+- `apps/technicians/views.py` (`ApplicationFormViewSet`, `TechnicianApplicationViewSet`, `ApplicationFormPublicSubmitView`, …)
+- `apps/technicians/urls.py`
+- `apps/technicians/filters.py` (`TechnicianApplicationFilter`)
+- `apps/technicians/services.py` (`build_application_snapshot`, `TechnicianApplicationConversionService`, …)
+- `apps/technicians/signals.py`
+- `apps/technicians/management/commands/seed_technician_data.py`
+- `apps/technicians/migrations/0001_technician_application.py`
+- `apps/technicians/migrations/0002_application_conversion_audit.py`
+- `apps/technicians/migrations/0003_application_form.py`
+- `apps/technicians/migrations/0004_rename_application_tenant_i_7a8b2c_idx_application_tenant__d68dde_idx_and_more.py`
+- `apps/technicians/migrations/__init__.py`
+- `apps/users/models.py` (`User`: reviewer/converter FK targets on `TechnicianApplication`)
+- `apps/tenants/models.py` (`Tenant`: `application_forms`, `technician_applications` reverse relations)
+- `apps/jobs/models.py` (`Skill`: referenced from technician onboarding / capabilities)
+- `apps/events/models.py` (`EventType`, `EntityType`, `Event`)
+- `apps/events/services.py` (event logging used from technician views/services)
+- `apps/events/views.py` / `apps/events/serializers.py` / `apps/events/urls.py`
+- `apps/events/migrations/` (including `0005_technician_application_events.py`, `0006_service_request_domain.py`)
+- `TECHNICIAN_APPLICATION_FULL_CODE_README.md`
+- `SERVICE_REQUEST_README.md`
+- `migrations.sql`
+
+### HTTP (current)
+
+- `GET|POST /api/v1/admin/application-forms/` → `ApplicationFormViewSet`
+- `GET|PATCH|PUT|DELETE /api/v1/admin/application-forms/{id}/` → `ApplicationFormViewSet`
+- `GET|POST /api/v1/admin/technician-applications/` → `TechnicianApplicationViewSet`
+- `GET|PATCH|PUT|DELETE /api/v1/admin/technician-applications/{id}/` → `TechnicianApplicationViewSet`
+- `POST /api/v1/admin/technician-applications/{id}/review|approve|reject|convert/` → actions on `TechnicianApplicationViewSet`
+- `POST /api/v1/forms/{form_id}/apply/` → `ApplicationFormPublicSubmitView`
+
+### Database tables (current)
+
+`application_forms`
+
+- `id` (UUID, PK)
+- `tenant_id` (FK → `tenants_tenant`)
+- `title` (varchar 255)
+- `slug` (slug, blank)
+- `description` (text, blank)
+- `status` (varchar 20: `draft` | `active` | `archived`)
+- `settings` (JSONB, default `{}`; model help_text: `duplicate_check_hours`, `confirmation_message`, `redirect_url`)
+- `created_at`, `updated_at`
+- indexes: `(tenant, status, -created_at)`, `(tenant, slug)`; constraint `unique_application_form_slug_per_tenant` (partial, non-empty slug)
+
+`technician_applications`
+
+- `id` (UUID, PK)
+- `tenant_id` (FK → `tenants_tenant`)
+- `application_form_id` (FK → `application_forms`, null, `SET NULL`, `related_name=applications`)
+- `applicant_type` (`individual` | `company`)
+- `first_name`, `last_name`, `company_name`, `email`, `phone`
+- `service_area`, `availability`, `experience`, `capabilities` (JSONB)
+- `answers` (JSONB; model: keyed by question slug; governed by `schema_version`)
+- `schema_version` (positive integer, default 1)
+- lifecycle: `status`, `submitted_at`, `status_changed_at`, `reviewed_by_id`, `reviewed_at`, `reviewer_notes`, `rejection_reason`
+- conversion: `converted_user_id`, `converted_technician_profile_id`, `converted_at`, `converted_by_id`, `application_snapshot` (on profile row is separate field below)
+- `source`, `metadata` (JSONB)
+- `created_at`, `updated_at`
+- indexes include `(tenant, status, -created_at)`, `(tenant, email)`, `(application_form, status, -created_at)`, …
+
+`technician_profiles` (conversion / audit touchpoint)
+
+- `application_snapshot` (JSONB): frozen technician application payload at conversion; built in `apps/technicians/services.py` (`build_application_snapshot`)
+
+### Model docstrings / soft schemas (reference)
+
+`TechnicianApplication.service_area` — counties, `service_region_keys`, `max_travel_miles`, notes  
+`TechnicianApplication.availability` — days, hours, `start_date`, `hours_per_week`, notes  
+`TechnicianApplication.experience` — years, employers, supplies/vehicle, certifications, references  
+`TechnicianApplication.capabilities` — `skill_keys`, specialties, `team_size`, languages  
+`TechnicianApplication.answers` — tenant-specific Q&A; keys = question slug  
+`ApplicationForm` class docstring — notes shared field set via `TechnicianApplication` columns today; mentions future `fields` JSON for per-form customization
+
+### Serializers (field surfaces)
+
+`ApplicationFormCreateSerializer` / `ApplicationFormUpdateSerializer` fields: `title`, `slug`, `description`, `status`, `settings` (+ read-only `id`, timestamps on create response)  
+`ApplicationFormDetailSerializer` fields: adds `is_accepting_submissions`, `application_count`, `status_counts`  
+`TechnicianApplicationSerializer` — full operator surface including `application_form`, structured JSON fields, `answers`, `schema_version`, lifecycle, conversion  
+`TechnicianApplicationPublicSubmitSerializer` writable fields: `applicant_type`, `first_name`, `last_name`, `company_name`, `email`, `phone`, `service_area`, `availability`, `experience`, `capabilities`, `answers` (no `schema_version` / `application_form` in body; tenant/form from URL/context)
+
+### Events (`apps/events/models.py` excerpts)
+
+`EntityType.TECHNICIAN_APPLICATION`  
+`EventType`: `technician_application.created`, `.reviewed`, `.approved`, `.rejected`, `.converted` (string values in `EventType` enum)
+
+### Permissions / tenancy
+
+- Admin routes: `IsAuthenticated` + `IsAdmin` on `ApplicationFormViewSet` and `TechnicianApplicationViewSet`
+- Public apply: `AllowAny` on `ApplicationFormPublicSubmitView`; tenant resolved from `Tenant` lookup by `form_id`
+- `get_current_tenant_id()` + `request.user.tenant_id` used in viewsets for queryset / `perform_create`
 

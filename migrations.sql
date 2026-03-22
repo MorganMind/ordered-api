@@ -1,5 +1,8 @@
 -- Auto-generated PostgreSQL migrations from Pydantic models
 -- Generated at: 2025-07-14T23:08:59.559755
+--
+-- Idempotent: safe to re-run in Supabase SQL Editor. Triggers use DROP IF EXISTS;
+-- FKs use table_constraints checks; policies use DO blocks; indexes use IF NOT EXISTS.
 
 BEGIN;
 
@@ -28,8 +31,9 @@ CREATE TABLE IF NOT EXISTS user_analytics (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
     );
 
+DROP TRIGGER IF EXISTS update_user_analytics_updated_at ON public.user_analytics;
     CREATE TRIGGER update_user_analytics_updated_at BEFORE UPDATE
-    ON user_analytics FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    ON public.user_analytics FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TABLE IF NOT EXISTS user_data (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -44,8 +48,9 @@ CREATE TABLE IF NOT EXISTS user_data (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
+DROP TRIGGER IF EXISTS update_user_data_updated_at ON public.user_data;
     CREATE TRIGGER update_user_data_updated_at BEFORE UPDATE
-    ON user_data FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    ON public.user_data FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TABLE IF NOT EXISTS user_settings (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -56,8 +61,9 @@ CREATE TABLE IF NOT EXISTS user_settings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
+DROP TRIGGER IF EXISTS update_user_settings_updated_at ON public.user_settings;
     CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE
-    ON user_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    ON public.user_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TABLE IF NOT EXISTS tag (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,8 +77,9 @@ CREATE TABLE IF NOT EXISTS tag (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
+DROP TRIGGER IF EXISTS update_tag_updated_at ON public.tag;
     CREATE TRIGGER update_tag_updated_at BEFORE UPDATE
-    ON tag FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    ON public.tag FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TABLE IF NOT EXISTS tagging (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,35 +90,71 @@ CREATE TABLE IF NOT EXISTS tagging (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
+DROP TRIGGER IF EXISTS update_tagging_updated_at ON public.tagging;
     CREATE TRIGGER update_tagging_updated_at BEFORE UPDATE
-    ON tagging FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    ON public.tagging FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 
--- Foreign Key Constraints
+-- Foreign Key Constraints (idempotent — safe to re-run)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_schema = 'public'
+      AND table_name = 'user_analytics'
+      AND constraint_name = 'fk_user_analytics_user_id'
+  ) THEN
+    ALTER TABLE public.user_analytics
+      ADD CONSTRAINT fk_user_analytics_user_id
+      FOREIGN KEY (user_id)
+      REFERENCES public.user_data(id)
+      ON DELETE CASCADE;
+  END IF;
+END $$;
 
-ALTER TABLE user_analytics 
-ADD CONSTRAINT fk_user_analytics_user_id 
-FOREIGN KEY (user_id) 
-REFERENCES user_data(id) 
-ON DELETE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_schema = 'public'
+      AND table_name = 'user_settings'
+      AND constraint_name = 'fk_user_settings_user_id'
+  ) THEN
+    ALTER TABLE public.user_settings
+      ADD CONSTRAINT fk_user_settings_user_id
+      FOREIGN KEY (user_id)
+      REFERENCES public.user_data(id)
+      ON DELETE CASCADE;
+  END IF;
+END $$;
 
-ALTER TABLE user_settings 
-ADD CONSTRAINT fk_user_settings_user_id 
-FOREIGN KEY (user_id) 
-REFERENCES user_data(id) 
-ON DELETE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_schema = 'public'
+      AND table_name = 'tag'
+      AND constraint_name = 'fk_tag_user_id'
+  ) THEN
+    ALTER TABLE public.tag
+      ADD CONSTRAINT fk_tag_user_id
+      FOREIGN KEY (user_id)
+      REFERENCES public.user_data(id)
+      ON DELETE CASCADE;
+  END IF;
+END $$;
 
-ALTER TABLE tag 
-ADD CONSTRAINT fk_tag_user_id 
-FOREIGN KEY (user_id) 
-REFERENCES user_data(id) 
-ON DELETE CASCADE;
-
-ALTER TABLE tagging 
-ADD CONSTRAINT fk_tagging_tag_id 
-FOREIGN KEY (tag_id) 
-REFERENCES tag(id) 
-ON DELETE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_schema = 'public'
+      AND table_name = 'tagging'
+      AND constraint_name = 'fk_tagging_tag_id'
+  ) THEN
+    ALTER TABLE public.tagging
+      ADD CONSTRAINT fk_tagging_tag_id
+      FOREIGN KEY (tag_id)
+      REFERENCES public.tag(id)
+      ON DELETE CASCADE;
+  END IF;
+END $$;
 
 COMMIT;
     
@@ -271,65 +314,10 @@ END $$;
 -- Webhook events policies (no user access): none; use service role only
 
 -- =====================================================
--- VIEW
+-- VIEW: public.user_membership_summary
+-- Defined once below (after burn_entitlement). Do not CREATE OR REPLACE an earlier
+-- narrower version here — Postgres 42P16 if the DB already has extra columns.
 -- =====================================================
-
--- Create view for user membership status and recent ledger entries
-CREATE OR REPLACE VIEW public.user_membership_summary AS
-WITH latest_membership AS (
-    SELECT DISTINCT ON (user_id)
-        user_id,
-        id AS membership_id,
-        plan_id,
-        status AS membership_status,
-        started_at,
-        expires_at,
-        canceled_at
-    FROM public.memberships
-    ORDER BY user_id, created_at DESC
-),
-recent_ledger AS (
-    SELECT 
-        user_id,
-        ARRAY_AGG(
-            json_build_object(
-                'id', id,
-                'source', source,
-                'type', type,
-                'amount', amount,
-                'quantity', quantity,
-                'unit_type', unit_type,
-                'entitlement_code', entitlement_code,
-                'correlation_reference_id', correlation_reference_id,
-                'created_at', created_at
-            ) ORDER BY created_at DESC
-        ) FILTER (WHERE rn <= 10) AS recent_entries
-    FROM (
-        SELECT 
-            *,
-            ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
-        FROM public.ledger_entries
-    ) ranked_entries
-    GROUP BY user_id
-)
-SELECT 
-    lm.user_id,
-    lm.membership_id,
-    lm.plan_id,
-    p.code AS plan_code,
-    p.name AS plan_name,
-    lm.membership_status,
-    lm.started_at,
-    lm.expires_at,
-    lm.canceled_at,
-    COALESCE(rl.recent_entries, ARRAY[]::json[]) AS last_ten_ledger_entries,
-    NOW() AS query_timestamp
-FROM latest_membership lm
-LEFT JOIN public.plans p ON lm.plan_id = p.id
-LEFT JOIN recent_ledger rl ON lm.user_id = rl.user_id;
-
--- Grant access to the view for authenticated users
-GRANT SELECT ON public.user_membership_summary TO authenticated;
 
 -- =====================================================
 -- TRIGGERS FOR IMMUTABILITY
@@ -566,12 +554,12 @@ $$;
 GRANT EXECUTE ON FUNCTION public.burn_entitlement TO authenticated;
 
 -- =====================================================
--- Add Balance to View (Update existing view)
+-- View: membership summary + ledger slice + membership_credit balance
 -- =====================================================
 
 DROP VIEW IF EXISTS public.user_membership_summary;
 
-CREATE OR REPLACE VIEW public.user_membership_summary AS
+CREATE VIEW public.user_membership_summary AS
 WITH latest_membership AS (
     SELECT DISTINCT ON (user_id)
         user_id,

@@ -1,9 +1,9 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+# Match runtime note in requirements.txt (3.12+)
+FROM python:3.12-slim
 
-# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000
 
 # Set working directory
 WORKDIR /app
@@ -20,7 +20,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project
 COPY . .
 
-EXPOSE $PORT
+# Settings load at import time; no DB/network needed for static files only.
+RUN SECRET_KEY=collectstatic-build-only-not-for-runtime DEBUG=True \
+    python manage.py collectstatic --noinput
 
-# Run the application
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 iact_api.asgi:application -k uvicorn.workers.UvicornWorker
+EXPOSE 8000
+
+CMD exec gunicorn ordered_api.asgi:application \
+    -k uvicorn.workers.UvicornWorker \
+    --bind "0.0.0.0:${PORT}" \
+    --workers "${GUNICORN_WORKERS:-2}" \
+    --threads "${GUNICORN_THREADS:-4}" \
+    --timeout "${GUNICORN_TIMEOUT:-120}" \
+    --access-logfile - \
+    --error-logfile -
