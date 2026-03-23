@@ -7,4 +7,5 @@ class TechniciansConfig(AppConfig):
     verbose_name = "Technicians"
 
     def ready(self):
+        import apps.technicians.inbox_admin  # noqa: F401
         import apps.technicians.signals  # noqa: F401

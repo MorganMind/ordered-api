@@ -19,6 +19,11 @@ from apps.technicians.models import ServiceRegion
 
 SKILLS_DATA = [
     # General Cleaning
+    {
+        "key": "general.basic_cleaning",
+        "label": "Basic Cleaning",
+        "category": "General Cleaning",
+    },
     {"key": "general.dusting", "label": "Dusting", "category": "General Cleaning"},
     {"key": "general.vacuuming", "label": "Vacuuming", "category": "General Cleaning"},
     {"key": "general.mopping", "label": "Mopping & Floor Care", "category": "General Cleaning"},
@@ -56,6 +61,7 @@ SKILLS_DATA = [
     {"key": "laundry.towel_refresh", "label": "Towel Refresh", "category": "Laundry & Linens"},
 
     # Organization
+    {"key": "org.organizing", "label": "Organizing", "category": "Organization"},
     {"key": "org.closet", "label": "Closet Organization", "category": "Organization"},
     {"key": "org.pantry", "label": "Pantry Organization", "category": "Organization"},
     {"key": "org.garage", "label": "Garage Organization", "category": "Organization"},

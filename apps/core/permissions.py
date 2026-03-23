@@ -6,6 +6,8 @@ Uses Django's auth User (AUTH_USER_MODEL). Extend when you add tenant_id on a cu
 
 from rest_framework.permissions import BasePermission
 
+from apps.users.models import UserRole
+
 
 class IsAdmin(BasePermission):
     """Staff/superuser — adjust when you add a dedicated admin role."""
@@ -18,7 +20,12 @@ class IsAdmin(BasePermission):
 
 
 class IsTechnician(BasePermission):
-    """Placeholder until technicians + custom user roles are wired."""
+    """Logged-in user whose Django ``User.role`` is technician."""
 
     def has_permission(self, request, view):
-        return False
+        u = request.user
+        return bool(
+            u
+            and u.is_authenticated
+            and getattr(u, "role", None) == UserRole.TECHNICIAN
+        )

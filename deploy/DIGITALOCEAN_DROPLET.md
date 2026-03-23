@@ -20,6 +20,16 @@ Django ASGI behind **Gunicorn + UvicornWorker**, static files via **WhiteNoise**
 
 If that succeeded, the API is running on the droplet at `127.0.0.1:8000`. Everything below assumes you SSH in and `cd` to the same directory that contains `manage.py` and `deploy/`.
 
+### Browser CORS (operator / Next.js)
+
+With **`DEBUG=False`**, `CORS_ALLOWED_ORIGINS` in `.env` must list every **frontend origin** that calls the API in the browser (scheme + host, no path). Example for Ordered HQ:
+
+`CORS_ALLOWED_ORIGINS=https://operator.orderedhq.com`
+
+Use commas for multiple apps (e.g. `https://operator.orderedhq.com,https://app.orderedhq.com`). Then rebuild/restart the web container. If this is wrong or empty, the browser shows **“CORS header Access-Control-Allow-Origin missing”** even when the API returns **200**; `curl` without an `Origin` header will still look fine.
+
+If nginx adds CORS headers too, avoid conflicting or duplicate `Access-Control-*` headers—usually it is simpler to let **Django** (`django-cors-headers`, already first in `MIDDLEWARE`) emit them.
+
 ---
 
 ## B. Daily work: SSH in

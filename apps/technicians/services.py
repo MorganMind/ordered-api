@@ -13,7 +13,7 @@ from typing import Optional
 from uuid import UUID
 
 import structlog
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -35,6 +35,15 @@ from apps.users.services.auth import SupabaseAuthService
 logger = structlog.get_logger(__name__)
 
 _machine = get_state_machine("technician_onboarding")
+
+
+def _choice_as_str(value):
+    """Coerce TextChoices / enums to plain str for JSONB and event payloads."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return getattr(value, "value", str(value))
 
 
 class TechnicianOnboardingService:
@@ -315,7 +324,7 @@ def build_application_snapshot(app: TechnicianApplication) -> dict:
         ),
         "schema_version": app.schema_version,
         "snapshot_at": timezone.now().isoformat(),
-        "applicant_type": app.applicant_type,
+        "applicant_type": _choice_as_str(app.applicant_type),
         "identity": {
             "first_name": app.first_name,
             "last_name": app.last_name,
@@ -389,12 +398,21 @@ class TechnicianApplicationConversionService:
                 self._finalize_application(
                     application, user, profile, reviewer_notes
                 )
-                self._log_events(application, user, profile, user_created)
 
         except Exception:
             if supabase_created and supabase_uid:
                 self._rollback_supabase(supabase_uid)
             raise
+
+        try:
+            self._log_events(application, user, profile, user_created)
+        except DatabaseError:
+            logger.exception(
+                "technician_conversion_audit_events_failed",
+                application_id=str(application.id),
+                tenant_id=str(application.tenant_id),
+                user_id=str(user.id),
+            )
 
         logger.info(
             "technician_application_converted",
@@ -506,7 +524,7 @@ class TechnicianApplicationConversionService:
                 "origin": "technician_application",
                 "application_id": str(app.id),
                 "company_name": app.company_name,
-                "applicant_type": app.applicant_type,
+                "applicant_type": _choice_as_str(app.applicant_type),
             },
         )
         return user, True
@@ -559,7 +577,7 @@ class TechnicianApplicationConversionService:
             "declared_experience": app.experience or {},
             "declared_service_area": app.service_area or {},
             "declared_capabilities": app.capabilities or {},
-            "applicant_type": app.applicant_type,
+            "applicant_type": _choice_as_str(app.applicant_type),
             "company_name": app.company_name,
         }
 
@@ -631,7 +649,7 @@ class TechnicianApplicationConversionService:
             "user_id": str(user.id),
             "profile_id": str(profile.id),
             "user_created": user_created,
-            "applicant_type": app.applicant_type,
+            "applicant_type": _choice_as_str(app.applicant_type),
             "email": app.email,
         }
 
@@ -651,7 +669,7 @@ class TechnicianApplicationConversionService:
             entity_id=profile.id,
             payload={
                 **common_payload,
-                "onboarding_status": profile.onboarding_status,
+                "onboarding_status": _choice_as_str(profile.onboarding_status),
             },
             actor=self.actor,
             tenant_id=app.tenant_id,
@@ -666,7 +684,7 @@ class TechnicianApplicationConversionService:
                 payload={
                     "origin": "technician_application_conversion",
                     "application_id": str(app.id),
-                    "role": user.role,
+                    "role": _choice_as_str(user.role),
                 },
                 actor=self.actor,
                 tenant_id=app.tenant_id,

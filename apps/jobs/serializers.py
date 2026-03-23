@@ -4,9 +4,17 @@ from .models import Job, Skill
 
 
 class SkillSerializer(serializers.ModelSerializer):
+    """
+    Skills use UUID primary keys. Expose ``pk`` (alias of ``id``) so clients
+    that expect a ``pk`` field match DRF conventions; values are UUID strings,
+    not integers.
+    """
+
+    pk = serializers.UUIDField(source="id", read_only=True)
+
     class Meta:
         model = Skill
-        fields = ["id", "key", "label", "category", "is_active"]
+        fields = ["id", "pk", "key", "label", "category", "is_active"]
         read_only_fields = fields
 
 

@@ -144,8 +144,10 @@ class TestApplicationFormFieldsAPI(TestCase):
         resp = self.client.get(self._url(form_id))
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertIn("fields_schema", resp.data)
+        self.assertIn("hidden_fields", resp.data)
         self.assertEqual(len(resp.data["fields_schema"]), 1)
         self.assertEqual(resp.data["fields_schema"][0]["field_key"], "name")
+        self.assertEqual(resp.data["hidden_fields"], [])
         self.assertIn("schema_version", resp.data)
 
     def test_update_form_add_fields(self):

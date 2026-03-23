@@ -31,6 +31,7 @@ from apps.technicians.models import (
     ApplicationForm,
     ApplicationFormStatus,
     ApplicationStatus,
+    FormField,
     OnboardingStatus,
     ServiceRegion,
     TechnicianApplication,
@@ -68,6 +69,15 @@ from apps.technicians.services import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+def _choice_value(value) -> str | None:
+    """Coerce TextChoices / enum-like values to string for JSON-safe event payloads."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return getattr(value, "value", str(value))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -490,6 +500,8 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
     Routes (mounted under /api/v1/admin/):
         GET/POST   application-forms/
         GET/PATCH/PUT/DELETE application-forms/{id}/
+        DELETE application-forms/{id}/fields/{field_id}/
+        POST   application-forms/{id}/fields/{field_id}/restore/
     """
 
     permission_classes = [IsAuthenticated, IsAdmin]
@@ -515,7 +527,13 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
 
         qs = ApplicationForm.objects.filter(tenant_id=tenant_id)
 
-        if self.action in ("retrieve", "update", "partial_update"):
+        if self.action in (
+            "retrieve",
+            "update",
+            "partial_update",
+            "delete_field",
+            "restore_field",
+        ):
             qs = qs.prefetch_related("fields")
 
         return qs
@@ -598,6 +616,141 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
         )
         instance.delete()
 
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path=r"fields/(?P<field_id>[0-9a-f-]+)",
+        url_name="delete-field",
+    )
+    def delete_field(self, request, pk=None, field_id=None):
+        """
+        DELETE /admin/application-forms/{id}/fields/{field_id}/
+
+        Hard-deletes the field if the form has no submissions.
+        Soft-deletes (sets visible=False) if the form has submissions.
+        """
+        form = self.get_object()
+
+        try:
+            field = form.fields.get(id=field_id)
+        except FormField.DoesNotExist:
+            return Response(
+                {
+                    "error": {
+                        "code": "field_not_found",
+                        "message": "Field not found on this form.",
+                    }
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        has_submissions = form.applications.exists()
+
+        if has_submissions:
+            field.visible = False
+            field.save(update_fields=["visible", "updated_at"])
+
+            logger.info(
+                "application_form_field_hidden",
+                form_id=str(form.id),
+                field_id=str(field.id),
+                field_key=field.field_key,
+                hidden_by=str(request.user.id),
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "action": "hidden",
+                    "message": (
+                        f"Field '{field.field_key}' hidden (form has submissions). "
+                        f"Use restore to make it visible again."
+                    ),
+                    "field": {
+                        "id": str(field.id),
+                        "field_key": field.field_key,
+                        "visible": False,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        field_key = field.field_key
+        field.delete()
+
+        logger.info(
+            "application_form_field_deleted",
+            form_id=str(form.id),
+            field_id=str(field_id),
+            field_key=field_key,
+            deleted_by=str(request.user.id),
+        )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"fields/(?P<field_id>[0-9a-f-]+)/restore",
+        url_name="restore-field",
+    )
+    def restore_field(self, request, pk=None, field_id=None):
+        """
+        POST /admin/application-forms/{id}/fields/{field_id}/restore/
+
+        Restores a hidden field (sets visible=True).
+        """
+        form = self.get_object()
+
+        try:
+            field = form.fields.get(id=field_id)
+        except FormField.DoesNotExist:
+            return Response(
+                {
+                    "error": {
+                        "code": "field_not_found",
+                        "message": "Field not found on this form.",
+                    }
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if field.visible:
+            return Response(
+                {
+                    "error": {
+                        "code": "already_visible",
+                        "message": "Field is already visible.",
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        field.visible = True
+        field.save(update_fields=["visible", "updated_at"])
+
+        logger.info(
+            "application_form_field_restored",
+            form_id=str(form.id),
+            field_id=str(field.id),
+            field_key=field.field_key,
+            restored_by=str(request.user.id),
+        )
+
+        return Response(
+            {
+                "success": True,
+                "action": "restored",
+                "message": f"Field '{field.field_key}' is now visible again.",
+                "field": {
+                    "id": str(field.id),
+                    "field_key": field.field_key,
+                    "visible": True,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TECHNICIAN APPLICATION VIEWSET (operator/admin)
@@ -660,10 +813,15 @@ class TechnicianApplicationViewSet(viewsets.ModelViewSet):
         if not tenant_id:
             return TechnicianApplication.objects.none()
 
-        return TechnicianApplication.objects.filter(tenant_id=tenant_id).select_related(
-            "converted_technician_profile",
+        qs = TechnicianApplication.objects.filter(tenant_id=tenant_id).select_related(
             "application_form",
         )
+        # List serializer does not expose conversion/profile joins; omitting
+        # ``converted_technician_profile`` avoids a JOIN on ``technician_profiles``
+        # (and its columns) when the DB schema may lag migrations.
+        if self.action != "list":
+            qs = qs.select_related("converted_technician_profile")
+        return qs
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
@@ -794,8 +952,8 @@ class TechnicianApplicationViewSet(viewsets.ModelViewSet):
             entity_type=EntityType.TECHNICIAN_APPLICATION,
             entity_id=application.id,
             payload={
-                "old_status": old_status,
-                "new_status": new_status,
+                "old_status": _choice_value(old_status),
+                "new_status": _choice_value(new_status),
                 "reviewer_notes_added": bool(reviewer_notes),
                 "rejection_reason": rejection_reason,
             },

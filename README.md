@@ -425,6 +425,8 @@ flutter run -t lib/main_production.dart
 
 ### HTTP (current)
 
+- **Frontend reference (technicians list/detail, schemas, query params):** [`docs/TECHNICIANS_API_FRONTEND.md`](docs/TECHNICIANS_API_FRONTEND.md)
+
 - `GET|POST /api/v1/admin/application-forms/` → `ApplicationFormViewSet`
 - `GET|PATCH|PUT|DELETE /api/v1/admin/application-forms/{id}/` → `ApplicationFormViewSet`
 - `GET|POST /api/v1/admin/technician-applications/` → `TechnicianApplicationViewSet`

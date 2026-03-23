@@ -3,6 +3,7 @@ Technician serializers for onboarding and profile management.
 """
 import re
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.jobs.models import Skill
@@ -40,9 +41,11 @@ class ServiceRegionSerializer(serializers.ModelSerializer):
 class SkillSummarySerializer(serializers.ModelSerializer):
     """Minimal skill serializer for technician profile."""
 
+    pk = serializers.UUIDField(source="id", read_only=True)
+
     class Meta:
         model = Skill
-        fields = ["id", "key", "label", "category"]
+        fields = ["id", "pk", "key", "label", "category"]
         read_only_fields = fields
 
 
@@ -134,11 +137,12 @@ class TechnicianOnboardingUpdateSerializer(serializers.Serializer):
     )
 
     # Relations (pass list of IDs)
+    # Skills use UUID primary keys (``jobs.Skill``); send UUID strings in JSON.
     skill_ids = serializers.ListField(
-        child=serializers.IntegerField(),
+        child=serializers.UUIDField(),
         required=False,
         allow_empty=True,
-        help_text="List of skill IDs to set",
+        help_text="List of skill UUIDs to set (matches GET /technicians/skills/ id/pk).",
     )
     service_region_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -574,12 +578,13 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
 
 
 class ApplicationFormDetailSerializer(serializers.ModelSerializer):
-    """Full detail serializer including nested fields."""
+    """Full detail serializer including nested fields (visible vs hidden)."""
 
     application_count = serializers.SerializerMethodField()
     is_accepting_submissions = serializers.BooleanField(read_only=True)
     status_counts = serializers.SerializerMethodField()
-    fields_schema = FormFieldSerializer(source="fields", many=True, read_only=True)
+    fields_schema = serializers.SerializerMethodField()
+    hidden_fields = serializers.SerializerMethodField()
     schema_version = serializers.SerializerMethodField()
 
     class Meta:
@@ -595,6 +600,7 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
             "application_count",
             "status_counts",
             "fields_schema",
+            "hidden_fields",
             "schema_version",
             "created_at",
             "updated_at",
@@ -605,6 +611,7 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
             "application_count",
             "status_counts",
             "fields_schema",
+            "hidden_fields",
             "schema_version",
             "created_at",
             "updated_at",
@@ -621,6 +628,14 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
 
     def get_schema_version(self, obj) -> int:
         return obj.schema_version_current
+
+    def get_fields_schema(self, obj) -> list:
+        visible = obj.fields.filter(visible=True).order_by("position", "created_at")
+        return FormFieldSerializer(visible, many=True).data
+
+    def get_hidden_fields(self, obj) -> list:
+        hidden = obj.fields.filter(visible=False).order_by("position", "created_at")
+        return FormFieldSerializer(hidden, many=True).data
 
 
 class ApplicationFormCreateSerializer(serializers.ModelSerializer):
@@ -691,9 +706,13 @@ class ApplicationFormCreateSerializer(serializers.ModelSerializer):
 
 class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
     """
-    Update application form. When ``fields_schema`` is sent, reconcile fields
-    (create / update / delete). With existing submissions, field_key renames
-    and removals are blocked.
+    Update application form. When ``fields_schema`` is sent, reconcile fields:
+      - Rows with an existing ``id`` are updated in place.
+      - Rows without ``id`` create new fields.
+      - Existing rows whose ``id`` is absent from the payload are deleted if
+        the form has no submissions, or soft-hidden (``visible=False``) if it does.
+
+    With submissions, ``field_key`` renames are still blocked.
     """
 
     fields_schema = FormFieldSerializer(many=True, required=False)
@@ -747,21 +766,9 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
         if not instance.applications.exists():
             return
 
-        existing_fields = {str(f.id): f.field_key for f in instance.fields.all()}
-        existing_keys = set(existing_fields.values())
-        incoming_keys = {f.get("field_key", "") for f in fields_data if f.get("field_key")}
-
-        removed_keys = existing_keys - incoming_keys
-        if removed_keys:
-            raise serializers.ValidationError(
-                {
-                    "fields_schema": (
-                        f"Cannot remove fields that may have answers: "
-                        f"{', '.join(sorted(removed_keys))}. "
-                        f"Set visible=false to hide them instead."
-                    )
-                }
-            )
+        existing_fields = {
+            str(f.id): f.field_key for f in instance.fields.all()
+        }
 
         for field_data in fields_data:
             fid = field_data.get("id")
@@ -792,6 +799,7 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
         return instance
 
     def _reconcile_fields(self, form, fields_data):
+        has_submissions = form.applications.exists()
         existing_by_id = {str(f.id): f for f in form.fields.all()}
         incoming_ids: set[str] = set()
 
@@ -812,9 +820,15 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
                 new_field = FormField.objects.create(form=form, **field_data)
                 incoming_ids.add(str(new_field.id))
 
-        to_delete = set(existing_by_id.keys()) - incoming_ids
-        if to_delete:
-            FormField.objects.filter(id__in=to_delete).delete()
+        to_remove_ids = set(existing_by_id.keys()) - incoming_ids
+        if to_remove_ids:
+            if has_submissions:
+                FormField.objects.filter(id__in=to_remove_ids).update(
+                    visible=False,
+                    updated_at=timezone.now(),
+                )
+            else:
+                FormField.objects.filter(id__in=to_remove_ids).delete()
 
 
 class ApplicationFormPublicSerializer(serializers.ModelSerializer):

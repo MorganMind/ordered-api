@@ -9,6 +9,7 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
+from corsheaders.defaults import default_headers
 
 from ordered_api.db_config import get_django_databases
 
@@ -45,24 +46,32 @@ _DEV_FRONTEND_ORIGINS = [
     *[f"http://localhost:{p}" for p in _LOCALHOST_DEV_PORTS],
     *[f"http://127.0.0.1:{p}" for p in _LOCALHOST_DEV_PORTS],
 ]
+_DEV_CORS_EXTRAS = [
+    *_DEV_FRONTEND_ORIGINS,
+    "http://localhost:8686",
+    "https://dev4.undock.ngrok.io",
+]
+_DEV_CORS_REGEXES = [
+    r"^http://localhost(:\d+)?$",
+    r"^http://127\.0\.0\.1(:\d+)?$",
+    r"^http://\[::1\](:\d+)?$",
+]
 
 _cors_env = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if _cors_env:
-    CORS_ALLOWED_ORIGINS = _cors_env
+    # Production/staging list from env; in DEBUG also allow local frontends (Next, etc.),
+    # otherwise a non-empty CORS_ALLOWED_ORIGINS skips the permissive branch below.
+    if DEBUG:
+        CORS_ALLOWED_ORIGINS = list(dict.fromkeys([*_cors_env, *_DEV_CORS_EXTRAS]))
+        CORS_ALLOWED_ORIGIN_REGEXES = _DEV_CORS_REGEXES
+    else:
+        CORS_ALLOWED_ORIGINS = _cors_env
+        CORS_ALLOWED_ORIGIN_REGEXES = []
     CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOWED_ORIGIN_REGEXES = []
 elif DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
-    CORS_ALLOWED_ORIGINS = [
-        *_DEV_FRONTEND_ORIGINS,
-        "http://localhost:8686",
-        "https://dev4.undock.ngrok.io",
-    ]
-    CORS_ALLOWED_ORIGIN_REGEXES = [
-        r"^http://localhost(:\d+)?$",
-        r"^http://127\.0\.0\.1(:\d+)?$",
-        r"^http://\[::1\](:\d+)?$",
-    ]
+    CORS_ALLOWED_ORIGINS = list(_DEV_CORS_EXTRAS)
+    CORS_ALLOWED_ORIGIN_REGEXES = list(_DEV_CORS_REGEXES)
 else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = []
@@ -77,19 +86,19 @@ CORS_ALLOW_METHODS = [
     "OPTIONS",
 ]
 
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "idempotency-key",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-    "cache-control",
-]
+# default_headers plus SPA / API client extras (idempotency-key is required for browser preflight).
+CORS_ALLOW_HEADERS = list(
+    dict.fromkeys(
+        [
+            *default_headers,
+            "accept-encoding",
+            "dnt",
+            "origin",
+            "idempotency-key",
+            "cache-control",
+        ]
+    )
+)
 
 _csrf_env = [o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
 if _csrf_env:

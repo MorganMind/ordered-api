@@ -14,6 +14,23 @@ from .models import Event
 logger = logging.getLogger(__name__)
 
 
+def _normalize_client_ip(request: Optional[HttpRequest]) -> Optional[str]:
+    """
+    Best-effort client IP for audit rows.
+
+    PostgreSQL ``inet`` rejects empty strings; some proxies send ``REMOTE_ADDR``
+    as "" — coerce to None so inserts do not raise ``ProgrammingError``.
+    """
+    if request is None:
+        return None
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        raw = xff.split(",")[0].strip()
+    else:
+        raw = (request.META.get("REMOTE_ADDR") or "").strip()
+    return raw or None
+
+
 def record_event(
     *,
     tenant_id: UUID,
@@ -30,19 +47,19 @@ def record_event(
     Contract: creation is logged from the ServiceRequest post_save signal only; status and
     pricing changes are logged from the view layer. Do not duplicate creation events in perform_create.
     """
-    ip_address = None
+    ip_address = _normalize_client_ip(request)
     user_agent = ""
     if request is not None:
-        xff = request.META.get("HTTP_X_FORWARDED_FOR")
-        if xff:
-            ip_address = xff.split(",")[0].strip()
-        else:
-            ip_address = request.META.get("REMOTE_ADDR")
         user_agent = request.META.get("HTTP_USER_AGENT", "") or ""
 
     resolved_actor = None
     if actor is not None and getattr(actor, "is_authenticated", False):
         resolved_actor = actor
+
+    if not isinstance(event_type, str):
+        event_type = getattr(event_type, "value", str(event_type))
+    if not isinstance(entity_type, str):
+        entity_type = getattr(entity_type, "value", str(entity_type))
 
     return Event.objects.create(
         tenant_id=tenant_id,
@@ -93,13 +110,14 @@ class EventService:
         # Get actor from context if not provided
         if not actor:
             actor = get_current_user()
+
+        if not isinstance(event_type, str):
+            event_type = getattr(event_type, "value", str(event_type))
+        if not isinstance(entity_type, str):
+            entity_type = getattr(entity_type, "value", str(entity_type))
         
-        # Extract request metadata
-        ip_address = None
-        user_agent = ""
-        if request:
-            ip_address = request.META.get('REMOTE_ADDR')
-            user_agent = request.META.get('HTTP_USER_AGENT', '')
+        ip_address = _normalize_client_ip(request)
+        user_agent = (request.META.get("HTTP_USER_AGENT", "") or "") if request else ""
         
         # Create the event
         event = Event.objects.create(

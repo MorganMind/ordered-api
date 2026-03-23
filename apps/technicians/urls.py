@@ -4,6 +4,22 @@ Technician URL routes.
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
+from apps.technicians.inbox_views import (
+    TechnicianInboxMarkReadView,
+    TechnicianInboxMessageListCreateView,
+    TechnicianInboxOperatorRecipientsView,
+    TechnicianInboxStartThreadView,
+    TechnicianInboxThreadDetailView,
+    TechnicianInboxThreadListView,
+)
+from apps.technicians.operator_inbox_views import (
+    OperatorInboxMarkReadView,
+    OperatorInboxMessageListCreateView,
+    OperatorInboxStartThreadView,
+    OperatorInboxTechnicianRecipientsView,
+    OperatorInboxThreadDetailView,
+    OperatorInboxThreadListView,
+)
 from apps.technicians.views import (
     ApplicationFormPublicSubmitView,
     ApplicationFormViewSet,
@@ -35,6 +51,66 @@ admin_router.register(
 )
 
 urlpatterns = [
+    path(
+        "operator/inbox/threads/",
+        OperatorInboxThreadListView.as_view(),
+        name="operator-inbox-threads",
+    ),
+    path(
+        "operator/inbox/threads/start/",
+        OperatorInboxStartThreadView.as_view(),
+        name="operator-inbox-start-thread",
+    ),
+    path(
+        "operator/inbox/technicians/",
+        OperatorInboxTechnicianRecipientsView.as_view(),
+        name="operator-inbox-technicians",
+    ),
+    path(
+        "operator/inbox/threads/<uuid:thread_id>/",
+        OperatorInboxThreadDetailView.as_view(),
+        name="operator-inbox-thread-detail",
+    ),
+    path(
+        "operator/inbox/threads/<uuid:thread_id>/messages/",
+        OperatorInboxMessageListCreateView.as_view(),
+        name="operator-inbox-messages",
+    ),
+    path(
+        "operator/inbox/threads/<uuid:thread_id>/mark-read/",
+        OperatorInboxMarkReadView.as_view(),
+        name="operator-inbox-mark-read",
+    ),
+    path(
+        "technicians/me/inbox/threads/",
+        TechnicianInboxThreadListView.as_view(),
+        name="technician-inbox-threads",
+    ),
+    path(
+        "technicians/me/inbox/threads/start/",
+        TechnicianInboxStartThreadView.as_view(),
+        name="technician-inbox-start-thread",
+    ),
+    path(
+        "technicians/me/inbox/operators/",
+        TechnicianInboxOperatorRecipientsView.as_view(),
+        name="technician-inbox-operators",
+    ),
+    path(
+        "technicians/me/inbox/threads/<uuid:thread_id>/",
+        TechnicianInboxThreadDetailView.as_view(),
+        name="technician-inbox-thread-detail",
+    ),
+    path(
+        "technicians/me/inbox/threads/<uuid:thread_id>/messages/",
+        TechnicianInboxMessageListCreateView.as_view(),
+        name="technician-inbox-messages",
+    ),
+    path(
+        "technicians/me/inbox/threads/<uuid:thread_id>/mark-read/",
+        TechnicianInboxMarkReadView.as_view(),
+        name="technician-inbox-mark-read",
+    ),
     # Technician self-service
     path("technicians/me/", TechnicianMeView.as_view(), name="technician-me"),
     path("technicians/me/submit/", TechnicianSubmitView.as_view(), name="technician-submit"),
