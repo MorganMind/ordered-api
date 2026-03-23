@@ -213,6 +213,25 @@ if not DEBUG:
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# --- Email (Resend via django-anymail) ---
+# https://resend.com — verify a domain and create an API key. Without
+# RESEND_API_KEY, mail goes to the console (dev) or set EMAIL_BACKEND yourself.
+_RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "webmaster@localhost")
+SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+
+if _RESEND_API_KEY:
+    INSTALLED_APPS = [*INSTALLED_APPS, "anymail"]
+    EMAIL_BACKEND = "anymail.backends.resend.EmailBackend"
+    ANYMAIL = {
+        "RESEND_API_KEY": _RESEND_API_KEY,
+    }
+else:
+    EMAIL_BACKEND = os.getenv(
+        "EMAIL_BACKEND",
+        "django.core.mail.backends.console.EmailBackend",
+    )
+
 if DEBUG:
     GOOGLE_CLOUD_CREDENTIALS = os.getenv("GOOGLE_CLOUD_CREDENTIALS")
     if GOOGLE_CLOUD_CREDENTIALS:
