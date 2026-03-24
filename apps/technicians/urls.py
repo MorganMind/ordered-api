@@ -31,9 +31,15 @@ from apps.technicians.views import (
     TechnicianSkillsListView,
     TechnicianSubmitView,
 )
+from apps.users.admin_views import ClientAdminViewSet
 
 # Admin router
 admin_router = DefaultRouter()
+admin_router.register(
+    r"clients",
+    ClientAdminViewSet,
+    basename="admin-client",
+)
 admin_router.register(
     r"technicians",
     TechnicianAdminViewSet,

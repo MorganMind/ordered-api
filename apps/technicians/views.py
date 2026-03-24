@@ -38,6 +38,7 @@ from apps.technicians.models import (
     TechnicianProfile,
     ONBOARDING_REQUIREMENTS,
 )
+from apps.technicians.application_emails import notify_application_submitted
 from apps.technicians.serializers import (
     ApplicationFormCreateSerializer,
     ApplicationFormDetailSerializer,
@@ -1185,6 +1186,8 @@ class TechnicianApplicationPublicSubmitView(APIView):
             source="public_form",
         )
 
+        notify_application_submitted(application)
+
         return Response(
             {
                 "success": True,
@@ -1359,6 +1362,8 @@ class ApplicationFormPublicSubmitView(APIView):
             source="public_form",
             schema_version=schema_version,
         )
+
+        notify_application_submitted(application)
 
         confirmation_message = (form.settings or {}).get(
             "confirmation_message",

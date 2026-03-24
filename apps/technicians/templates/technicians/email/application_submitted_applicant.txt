@@ -1,0 +1,11 @@
+{{ tenant_name }}
+
+We received your application
+
+Hi {{ applicant_name }},
+
+Thank you for applying{% if form_title %} to "{{ form_title }}"{% endif %}. Our team will review your submission and reach out if we need anything else.
+
+Your reference code: {{ reference }}
+
+This message was sent because you submitted an application at {{ tenant_name }}.

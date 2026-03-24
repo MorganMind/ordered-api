@@ -38,6 +38,14 @@ class Tenant(BaseModel):
     # Contact info
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=50, blank=True)
+    operator_admin_email = models.EmailField(
+        blank=True,
+        default="",
+        help_text=(
+            "Receives a notification when someone submits a technician application "
+            "(public form). Leave blank to skip operator copy."
+        ),
+    )
     
     # Settings (JSONB for flexibility)
     settings = models.JSONField(default=dict, blank=True)
@@ -48,6 +56,12 @@ class Tenant(BaseModel):
         default="UTC",
         validators=[validate_timezone],
         help_text="IANA timezone (e.g., 'America/New_York', 'Europe/London')"
+    )
+    logo_url = models.URLField(
+        max_length=2048,
+        null=True,
+        blank=True,
+        help_text="Public URL for workspace/organization logo (upload via API or external CDN).",
     )
     
     class Meta:

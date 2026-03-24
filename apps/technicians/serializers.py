@@ -62,6 +62,9 @@ class TechnicianProfileReadSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source="user.last_name", read_only=True)
     full_name = serializers.CharField(source="user.full_name", read_only=True)
     phone = serializers.CharField(source="user.phone", read_only=True)
+    avatar_url = serializers.URLField(
+        source="user.avatar_url", read_only=True, allow_null=True
+    )
 
     # Relations
     skills = SkillSummarySerializer(source="user.skills", many=True, read_only=True)
@@ -84,6 +87,7 @@ class TechnicianProfileReadSerializer(serializers.ModelSerializer):
             "last_name",
             "full_name",
             "phone",
+            "avatar_url",
             # Profile info
             "onboarding_status",
             "is_eligible",

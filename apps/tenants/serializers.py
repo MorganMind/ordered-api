@@ -20,12 +20,39 @@ class TenantSerializer(serializers.ModelSerializer):
             "status",
             "email",
             "phone",
+            "operator_admin_email",
+            "logo_url",
             "timezone",
             "is_active",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "slug", "created_at", "updated_at"]
+
+
+class TenantNotificationSettingsSerializer(serializers.ModelSerializer):
+    """Operator-editable notification address for the workspace tenant."""
+
+    class Meta:
+        model = Tenant
+        fields = ["operator_admin_email"]
+
+
+class TenantMePatchSerializer(serializers.ModelSerializer):
+    """Workspace staff may PATCH their tenant via ``/tenants/me/`` (name, external ``logo_url``)."""
+
+    class Meta:
+        model = Tenant
+        fields = ["name", "logo_url"]
+        extra_kwargs = {
+            "name": {"required": False},
+            "logo_url": {"allow_null": True, "required": False, "allow_blank": True},
+        }
+
+    def validate_logo_url(self, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
 
 
 class TenantMinimalSerializer(serializers.ModelSerializer):

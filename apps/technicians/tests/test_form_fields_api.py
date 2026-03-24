@@ -2,6 +2,8 @@
 Integration tests for application forms with custom fields and public apply.
 """
 
+from unittest.mock import patch
+
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -330,7 +332,8 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
         keys = [f["field_key"] for f in resp.data["fields_schema"]]
         self.assertEqual(keys, ["full_name", "service_type", "available"])
 
-    def test_submit_valid_answers(self):
+    @patch("apps.technicians.views.notify_application_submitted")
+    def test_submit_valid_answers(self, mock_notify):
         data = {
             "first_name": "Alice",
             "last_name": "Smith",
@@ -343,6 +346,7 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
         }
         resp = self.client.post(self._url(), data, format="json")
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        mock_notify.assert_called_once()
 
     def test_submit_missing_required_answer(self):
         data = {

@@ -82,6 +82,13 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     )
     metadata = models.JSONField(default=dict, blank=True)
 
+    avatar_url = models.URLField(
+        max_length=2048,
+        blank=True,
+        null=True,
+        help_text="Public or app-served URL for profile photo (all roles).",
+    )
+
     skills = models.ManyToManyField(
         "jobs.Skill",
         blank=True,

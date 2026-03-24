@@ -206,7 +206,9 @@ GET /api/v1/technicians/onboarding-requirements/
 | `PATCH` | `/api/v1/technicians/me/` | Update onboarding fields |
 | `POST` | `/api/v1/technicians/me/submit/` | Submit for review |
 
-These require an authenticated user with a **technician** role in your product model; the backend `IsTechnician` permission is currently a placeholder—confirm role checks in the SPA or tighten permissions on the API if needed.
+These require **`IsAuthenticated`** and **`IsTechnician`** (`User.role === "technician"` in `apps/users/models.py`).
+
+**Technician app implementation guide** (every writable field, merge rules, inbox pin, what is not editable): **`docs/TECHNICIAN_APP_SELF_SERVICE.md`**.
 
 ---
 

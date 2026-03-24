@@ -29,3 +29,21 @@ class IsTechnician(BasePermission):
             and u.is_authenticated
             and getattr(u, "role", None) == UserRole.TECHNICIAN
         )
+
+
+class IsTenantWorkspaceStaff(BasePermission):
+    """
+    Workspace operators: Django staff/superuser, ``is_tenant_operator``, or
+    ``role`` admin / ``\"operator\"`` (aligned with operator inbox / service requests).
+    """
+
+    def has_permission(self, request, view):
+        u = request.user
+        if not u or not u.is_authenticated:
+            return False
+        if getattr(u, "is_staff", False) or getattr(u, "is_superuser", False):
+            return True
+        if getattr(u, "is_tenant_operator", False):
+            return True
+        role = getattr(u, "role", None)
+        return role in (UserRole.ADMIN, "operator")

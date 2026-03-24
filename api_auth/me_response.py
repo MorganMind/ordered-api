@@ -3,11 +3,13 @@ Build GET /api/v1/auth/me/ JSON to match Ordered frontend (mapMeResponseFromApi 
 
 Contract:
 - Top-level tenant_id and tenantId (same UUID string) when user has an org.
-- tenant object with id (same UUID), name, slug, color, plan, status, settings.
+- tenant object with id (same UUID), name, slug, color, plan, status, settings,
+  operator_admin_email (nullable string from DB for application-alerts recipient).
 - membership: { "tenant_id": "<uuid>" } when resolved (for clients that read membership.tenant_id).
 - organization_id and workspace_id duplicate tenant_id when set (alias names some clients expect).
 - Top-level timezone mirrors tenant primary timezone for convenience.
 - When user has no tenant: tenant_id, tenantId, tenant, membership, organization_id, workspace_id are null.
+- Top-level avatar_url from Django users.User when the row resolves (null if none).
 
 Tenant resolution order: JWT app_metadata / user_metadata (tenant_id or nested tenant),
 then Django users.User (supabase_uid / email) if apps.users is installed,
@@ -75,15 +77,20 @@ def tenant_seed_from_claims(claims: dict | None) -> dict[str, Any]:
     return {"id": None}
 
 
-def _tenant_seed_from_user_model(request) -> dict[str, Any] | None:
-    """When JWT has no tenant hints, use Django ``users.User.tenant_id`` if installed."""
+def _django_user_for_auth_me(request) -> Any:
+    """Resolve ``apps.users.User`` from JWT sub / email when installed."""
+    cache_attr = "_cached_django_user_me_v1"
+    if hasattr(request, cache_attr):
+        return getattr(request, cache_attr)
     try:
         from django.apps import apps
 
         if not apps.is_installed("users"):
+            setattr(request, cache_attr, None)
             return None
         User = apps.get_model("users", "User")
     except LookupError:
+        setattr(request, cache_attr, None)
         return None
 
     uid = getattr(request, "user_id", None)
@@ -93,6 +100,13 @@ def _tenant_seed_from_user_model(request) -> dict[str, Any] | None:
         user = User.objects.filter(supabase_uid=uid).first()
     if user is None and email:
         user = User.objects.filter(email__iexact=email).first()
+    setattr(request, cache_attr, user)
+    return user
+
+
+def _tenant_seed_from_user_model(request) -> dict[str, Any] | None:
+    """When JWT has no tenant hints, use Django ``users.User.tenant_id`` if installed."""
+    user = _django_user_for_auth_me(request)
     if user is None:
         return None
     tid = getattr(user, "tenant_id", None)
@@ -168,8 +182,11 @@ def enrich_tenant_for_auth_me(seed: dict[str, Any]) -> dict[str, Any] | None:
     db_settings: dict[str, Any] = {}
     db_timezone = "UTC"
     if row:
-        name = name or row.name
-        slug = slug or row.slug
+        # DB is authoritative for workspace label + slug (PATCH /tenants/me/, admin, etc.).
+        # JWT app_metadata often still carries the old tenant_name after a rename, which
+        # previously made ``name = name or row.name`` freeze the UI on stale metadata.
+        name = row.name
+        slug = row.slug
         status = status or row.status
         db_settings = row.settings if isinstance(row.settings, dict) else {}
         db_timezone = row.timezone or "UTC"
@@ -186,7 +203,7 @@ def enrich_tenant_for_auth_me(seed: dict[str, Any]) -> dict[str, Any] | None:
         plan = "trial" if (status or "").lower() == "trial" else "professional"
     status = status or "active"
 
-    return {
+    out_block = {
         "id": str(tid),
         "name": name or "",
         "slug": slug or "",
@@ -195,6 +212,14 @@ def enrich_tenant_for_auth_me(seed: dict[str, Any]) -> dict[str, Any] | None:
         "status": status,
         "settings": merged_settings,
     }
+    if row:
+        out_block["operator_admin_email"] = (row.operator_admin_email or "").strip() or None
+        lu = getattr(row, "logo_url", None)
+        out_block["logo_url"] = lu if lu else None
+    else:
+        out_block["operator_admin_email"] = None
+        out_block["logo_url"] = None
+    return out_block
 
 
 def build_auth_me_response(request) -> dict[str, Any]:
@@ -235,6 +260,12 @@ def build_auth_me_response(request) -> dict[str, Any]:
         "user_role": user_meta.get("role"),
         "app_role": app_meta.get("role"),
     }
+
+    du = _django_user_for_auth_me(request)
+    if du is not None:
+        out["avatar_url"] = (getattr(du, "avatar_url", None) or "").strip() or None
+    else:
+        out["avatar_url"] = None
 
     if not tenant_block:
         out["tenant_id"] = None

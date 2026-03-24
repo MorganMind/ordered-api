@@ -10,7 +10,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.core.middleware import get_current_tenant_id
 from apps.core.permissions import IsAdmin
-from apps.jobs.models import Job
+from apps.events.models import EntityType, EventType
+from apps.events.services import record_event
+from apps.jobs.models import Job, JobStatus
 from apps.jobs.serializers import JobSerializer
 
 from .filters import BookingFilter
@@ -176,9 +178,20 @@ class BookingViewSet(viewsets.ModelViewSet):
             tenant_id=booking.tenant_id,
             title=booking.title,
             booking=booking,
-            status="open",
+            status=JobStatus.OPEN,
         )
-        job = Job.objects.select_related("booking", "booking__property").get(pk=job.pk)
+        record_event(
+            tenant_id=booking.tenant_id,
+            actor=request.user,
+            event_type=EventType.BOOKING_JOB_GENERATED,
+            entity_type=EntityType.BOOKING,
+            entity_id=booking.id,
+            payload={"job_id": str(job.id)},
+            request=request,
+        )
+        job = Job.objects.select_related(
+            "booking", "booking__property", "assigned_to"
+        ).get(pk=job.pk)
         return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="jobs")
@@ -186,7 +199,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = self.get_object()
         qs = (
             Job.objects.filter(booking=booking)
-            .select_related("booking", "booking__property", "tenant")
+            .select_related("booking", "booking__property", "tenant", "assigned_to")
             .order_by("-created_at")
         )
         paginator = OperatorPagination()

@@ -6,6 +6,16 @@ from django.db import models
 from apps.core.models import TenantAwareModel
 
 
+class JobStatus(models.TextChoices):
+    """Lifecycle for field execution; kept as strings for API compatibility."""
+
+    OPEN = "open", "Open"
+    ASSIGNED = "assigned", "Assigned"
+    IN_PROGRESS = "in_progress", "In Progress"
+    COMPLETED = "completed", "Completed"
+    CANCELLED = "cancelled", "Cancelled"
+
+
 class Skill(models.Model):
     """
     Tenant-agnostic catalog entry (technician capabilities, job matching).
@@ -29,7 +39,11 @@ class Skill(models.Model):
 
 class Job(TenantAwareModel):
     title = models.CharField(max_length=255)
-    status = models.CharField(max_length=32, default="open", db_index=True)
+    status = models.CharField(
+        max_length=32,
+        default=JobStatus.OPEN,
+        db_index=True,
+    )
     booking = models.ForeignKey(
         "bookings.Booking",
         on_delete=models.SET_NULL,
@@ -50,6 +64,13 @@ class Job(TenantAwareModel):
         null=True,
         blank=True,
         related_name="jobs_created",
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_jobs",
     )
 
     class Meta:

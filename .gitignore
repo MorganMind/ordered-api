@@ -12,6 +12,7 @@ htmlcov/
 .mypy_cache/
 db.sqlite3
 staticfiles/
+media/
 .DS_Store
 .idea/
 .vscode/

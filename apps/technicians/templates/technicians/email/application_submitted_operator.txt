@@ -1,0 +1,8 @@
+{{ tenant_name }} — New technician application
+
+Form: {{ form_title }}
+Applicant: {{ applicant_name }}
+Email: {{ applicant_email }}
+Reference: {{ reference }}
+
+Review this application in your operator workspace.

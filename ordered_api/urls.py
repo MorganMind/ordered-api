@@ -5,12 +5,15 @@ Mounted under ``/api/v1/`` (plus ``/admin/``).
 Not mounted yet (no ``urls.py`` in tree): ``apps.briefs``.
 """
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", include("api_auth.urls")),
+    path("api/v1/", include("apps.users.urls")),
     path("api/v1/", include("user.urls")),
     path("api/v1/", include("files.urls")),
     path("api/v1/", include("tag.urls")),
@@ -27,3 +30,6 @@ urlpatterns = [
     path("api/v1/", include("apps.intake.urls")),
     path("api/v1/", include("apps.technicians.urls")),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

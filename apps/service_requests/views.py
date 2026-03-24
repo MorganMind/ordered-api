@@ -7,10 +7,15 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.core.permissions import IsTenantWorkspaceStaff
 from apps.events.models import EntityType, EventType
 from apps.events.services import record_event
+from apps.jobs.models import Job
+from apps.jobs.serializers import JobSerializer
+from apps.jobs.services.conversion import convert_service_request_to_job
 from apps.pricing.serializers import PriceSnapshotSerializer
 from apps.pricing.services import create_price_snapshot_from_service_request
+from apps.users.models import UserRole
 
 from .models import ServiceRequest, ServiceRequestSource, ServiceRequestStatus
 from .permissions import (
@@ -60,6 +65,9 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
                 ServiceRequestObjectPermission(),
             ]
 
+        if self.action == "convert_to_job":
+            return [IsAuthenticated(), IsTenantWorkspaceStaff()]
+
         return [
             IsAuthenticated(),
             IsTenantMember(),
@@ -68,11 +76,12 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
 
     def _caller_is_operator(self) -> bool:
         u = self.request.user
-        return bool(
-            getattr(u, "is_staff", False)
-            or getattr(u, "is_superuser", False)
-            or getattr(u, "is_tenant_operator", False)
-        )
+        if getattr(u, "is_staff", False) or getattr(u, "is_superuser", False):
+            return True
+        if getattr(u, "is_tenant_operator", False):
+            return True
+        role = getattr(u, "role", None)
+        return role in (UserRole.ADMIN, "operator")
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -226,3 +235,42 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["post"], url_path="convert-to-job")
+    def convert_to_job(self, request, pk: str | None = None) -> Response:
+        sr: ServiceRequest = self.get_object()
+        if sr.converted_job_id:
+            return Response(
+                {"detail": "This service request has already been converted to a job."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if sr.status != ServiceRequestStatus.PRICED:
+            return Response(
+                {
+                    "detail": (
+                        "Only priced service requests can be converted to a job. "
+                        f"Current status: {sr.status}."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        title = request.data.get("title")
+        if title is not None and not isinstance(title, str):
+            return Response(
+                {"detail": "Field 'title' must be a string when provided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        job = convert_service_request_to_job(
+            sr,
+            actor=request.user,
+            title=title.strip() if isinstance(title, str) and title.strip() else None,
+            request=request,
+        )
+        job = Job.objects.select_related(
+            "tenant",
+            "service_request",
+            "booking",
+            "booking__property",
+            "assigned_to",
+        ).get(pk=job.pk)
+        return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
