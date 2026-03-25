@@ -247,7 +247,10 @@ class TestApplicationFormFieldsAPI(TestCase):
 
         resp = self.client.get(self._url())
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        forms = resp.data.get("results", resp.data)
+        if isinstance(resp.data, list):
+            forms = resp.data
+        else:
+            forms = resp.data.get("results", resp.data)
         if isinstance(forms, list):
             form_data = forms[0]
         else:
@@ -273,6 +276,49 @@ class TestApplicationFormFieldsAPI(TestCase):
         self.assertEqual(len(field.options), 3)
         self.assertEqual(field.options[0], {"label": "Red", "value": "Red"})
 
+    def test_list_form_templates(self):
+        resp = self.client.get("/api/v1/admin/application-forms/templates/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["templates"])
+        self.assertEqual(
+            resp.data["templates"][0]["key"],
+            "cleaning_technician_intake_v1",
+        )
+
+    def test_create_form_from_template(self):
+        resp = self.client.post(
+            "/api/v1/admin/application-forms/from-template/",
+            {
+                "template_key": "cleaning_technician_intake_v1",
+                "title": "Cleaning Intake v1",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        form = ApplicationForm.objects.get(id=resp.data["form"]["id"])
+        self.assertEqual(form.title, "Cleaning Intake v1")
+        self.assertGreater(form.fields.count(), 0)
+        county = form.fields.get(field_key="county")
+        self.assertEqual(county.field_type, FormFieldType.TEXT)
+
+    def test_create_form_from_scratch_action(self):
+        resp = self.client.post(
+            "/api/v1/admin/application-forms/from-scratch/",
+            {
+                "title": "Scratch Form",
+                "fields_schema": [
+                    {
+                        "field_key": "custom_question",
+                        "label": "Custom",
+                        "field_type": "text",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["source"], "scratch")
+
 
 class TestPublicFormSubmissionWithCustomFields(TestCase):
     """Public GET/POST ``/api/v1/forms/{id}/apply/``."""
@@ -289,6 +335,8 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
             slug="public-hiring",
             status=ApplicationFormStatus.ACTIVE,
         )
+        self.tenant.logo_url = "https://cdn.example.com/tenant-logo.png"
+        self.tenant.save(update_fields=["logo_url"])
         FormField.objects.create(
             form=self.form,
             field_key="full_name",
@@ -331,6 +379,12 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
         self.assertEqual(len(resp.data["fields_schema"]), 3)
         keys = [f["field_key"] for f in resp.data["fields_schema"]]
         self.assertEqual(keys, ["full_name", "service_type", "available"])
+        self.assertIn("public_branding", resp.data)
+        self.assertEqual(resp.data["public_branding"]["name"], self.tenant.name)
+        self.assertEqual(
+            resp.data["public_branding"]["logo_url"],
+            "https://cdn.example.com/tenant-logo.png",
+        )
 
     @patch("apps.technicians.views.notify_application_submitted")
     def test_submit_valid_answers(self, mock_notify):

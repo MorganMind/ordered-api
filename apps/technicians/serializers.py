@@ -839,6 +839,7 @@ class ApplicationFormPublicSerializer(serializers.ModelSerializer):
     """Public read-only form definition for rendering the applicant form."""
 
     fields_schema = serializers.SerializerMethodField()
+    public_branding = serializers.SerializerMethodField()
 
     class Meta:
         model = ApplicationForm
@@ -847,11 +848,29 @@ class ApplicationFormPublicSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "fields_schema",
+            "public_branding",
         ]
-        read_only_fields = ["id", "title", "description", "fields_schema"]
+        read_only_fields = [
+            "id",
+            "title",
+            "description",
+            "fields_schema",
+            "public_branding",
+        ]
 
     def get_fields_schema(self, obj) -> list[dict]:
         return obj.get_field_schema()
+
+    def get_public_branding(self, obj) -> dict:
+        tenant = getattr(obj, "tenant", None)
+        if tenant is None:
+            return {"name": None, "logo_url": None, "logo": None}
+        return {
+            "name": tenant.name,
+            "logo_url": tenant.logo_url,
+            # Alias key for clients expecting `logo`.
+            "logo": tenant.logo_url,
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

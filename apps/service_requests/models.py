@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
-from apps.core.models import TenantAwareModel
+from apps.core.models import BaseModel, TenantAwareModel
 
 
 class ServiceRequestStatus(models.TextChoices):
@@ -69,6 +69,78 @@ class ServiceRequestSource(models.TextChoices):
     FORM = "form", "Form"
     API = "api", "API"
     IMPORT = "import", "Import"
+
+
+class ServiceOffering(TenantAwareModel):
+    """
+    Tenant-defined service (offering) with optional links to the global Skill catalog.
+
+    ``reporting_category`` is copied onto ``ServiceRequest.service_type`` for filters,
+    analytics, and legacy pricing keys when a request is tied to this offering.
+    """
+
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=80)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    reporting_category = models.CharField(
+        max_length=64,
+        choices=ServiceType.choices,
+        default=ServiceType.OTHER,
+        help_text=(
+            "Stored on ServiceRequest.service_type when this offering is selected — "
+            "keeps reporting aligned with the global ServiceType enum."
+        ),
+    )
+    skills = models.ManyToManyField(
+        "jobs.Skill",
+        through="ServiceOfferingSkill",
+        related_name="service_offerings",
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "service_offerings"
+        ordering = ["sort_order", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "slug"],
+                name="uniq_service_offering_tenant_slug",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "is_active", "sort_order"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ServiceOfferingSkill(BaseModel):
+    """Ordered attachment of a catalog Skill to a tenant ServiceOffering."""
+
+    service_offering = models.ForeignKey(
+        ServiceOffering,
+        on_delete=models.CASCADE,
+        related_name="offering_skills",
+    )
+    skill = models.ForeignKey(
+        "jobs.Skill",
+        on_delete=models.CASCADE,
+        related_name="offering_skill_links",
+    )
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "service_offering_skills"
+        ordering = ["sort_order", "skill__label"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["service_offering", "skill"],
+                name="uniq_service_offering_skill",
+            ),
+        ]
 
 
 class ServiceRequest(TenantAwareModel):
@@ -146,6 +218,14 @@ class ServiceRequest(TenantAwareModel):
         choices=ServiceType.choices,
         db_index=True,
     )
+    service_offering = models.ForeignKey(
+        ServiceOffering,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="service_requests",
+        db_index=True,
+    )
     timing_preference = models.JSONField(
         default=dict,
         blank=True,
@@ -202,6 +282,7 @@ class ServiceRequest(TenantAwareModel):
         indexes = [
             models.Index(fields=["tenant", "status", "-created_at"]),
             models.Index(fields=["tenant", "service_type", "-created_at"]),
+            models.Index(fields=["tenant", "service_offering", "-created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -212,6 +293,13 @@ class ServiceRequest(TenantAwareModel):
             raise ValidationError(
                 "At least one of contact_phone or contact_email must be provided."
             )
+
+    @property
+    def service_display_label(self) -> str:
+        off = getattr(self, "service_offering", None)
+        if off is not None:
+            return off.name
+        return str(self.get_service_type_display())
 
     @property
     def is_converted(self) -> bool:

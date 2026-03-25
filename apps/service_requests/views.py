@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Prefetch
+from django.utils.text import slugify
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -10,20 +12,32 @@ from rest_framework.response import Response
 from apps.core.permissions import IsTenantWorkspaceStaff
 from apps.events.models import EntityType, EventType
 from apps.events.services import record_event
-from apps.jobs.models import Job
+from apps.jobs.models import Job, Skill
 from apps.jobs.serializers import JobSerializer
 from apps.jobs.services.conversion import convert_service_request_to_job
 from apps.pricing.serializers import PriceSnapshotSerializer
 from apps.pricing.services import create_price_snapshot_from_service_request
 from apps.users.models import UserRole
 
-from .models import ServiceRequest, ServiceRequestSource, ServiceRequestStatus
+from .models import (
+    ServiceOffering,
+    ServiceOfferingSkill,
+    ServiceRequest,
+    ServiceRequestSource,
+    ServiceRequestStatus,
+)
+from .template_library import (
+    get_service_offering_template,
+    list_service_offering_templates,
+)
 from .permissions import (
     IsTenantMember,
     IsTenantOperator,
     ServiceRequestObjectPermission,
 )
 from .serializers import (
+    ServiceOfferingSerializer,
+    ServiceOfferingWriteSerializer,
     ServiceRequestClientUpdateSerializer,
     ServiceRequestCreateSerializer,
     ServiceRequestOperatorSerializer,
@@ -49,7 +63,14 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
     """
 
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["status", "service_type", "source", "client", "property_ref"]
+    filterset_fields = [
+        "status",
+        "service_type",
+        "service_offering",
+        "source",
+        "client",
+        "property_ref",
+    ]
     ordering_fields = ["created_at", "updated_at", "status"]
     ordering = ["-created_at"]
     http_method_names = ["get", "post", "patch", "head", "options"]
@@ -110,6 +131,15 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             "property_ref",
             "latest_price_snapshot",
             "converted_job",
+            "service_offering",
+        ).prefetch_related(
+            Prefetch(
+                "service_offering__offering_skills",
+                queryset=ServiceOfferingSkill.objects.select_related("skill").order_by(
+                    "sort_order",
+                    "skill__label",
+                ),
+            ),
         )
 
         if getattr(user, "is_superuser", False):
@@ -274,3 +304,124 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             "assigned_to",
         ).get(pk=job.pk)
         return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+
+class ServiceOfferingViewSet(viewsets.ModelViewSet):
+    """
+    Tenant-scoped catalog of bookable services (offerings) with nested skills.
+
+    Members may list/retrieve; operators may create, update, and delete.
+    """
+
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["is_active", "slug"]
+    ordering_fields = ["sort_order", "name", "created_at"]
+    ordering = ["sort_order", "name"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve", "templates"):
+            return [IsAuthenticated(), IsTenantMember()]
+        return [IsAuthenticated(), IsTenantWorkspaceStaff()]
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return ServiceOfferingWriteSerializer
+        return ServiceOfferingSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return ServiceOffering.objects.none()
+        base = ServiceOffering.objects.select_related("tenant").prefetch_related(
+            Prefetch(
+                "offering_skills",
+                queryset=ServiceOfferingSkill.objects.select_related("skill").order_by(
+                    "sort_order",
+                    "skill__label",
+                ),
+            ),
+        )
+        if getattr(user, "is_superuser", False):
+            return base
+        tid = getattr(user, "tenant_id", None)
+        if not tid:
+            return ServiceOffering.objects.none()
+        return base.filter(tenant_id=tid)
+
+    def perform_create(self, serializer) -> None:
+        serializer.save(tenant_id=self.request.user.tenant_id)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        read = ServiceOfferingSerializer(
+            serializer.instance,
+            context=self.get_serializer_context(),
+        )
+        headers = self.get_success_headers(read.data)
+        return Response(read.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        fresh = self.get_queryset().get(pk=instance.pk)
+        read = ServiceOfferingSerializer(
+            fresh,
+            context=self.get_serializer_context(),
+        )
+        return Response(read.data)
+
+    def update(self, request, *args, **kwargs):
+        return self.partial_update(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], url_path="templates")
+    def templates(self, request):
+        return Response({"templates": list_service_offering_templates()})
+
+    @action(detail=False, methods=["post"], url_path="from-template")
+    def from_template(self, request):
+        template_key = str(request.data.get("template_key") or "").strip()
+        template = get_service_offering_template(template_key)
+        if template is None:
+            return Response(
+                {"detail": f"Unknown template_key '{template_key}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = {
+            "name": request.data.get("name") or template.name,
+            "slug": request.data.get("slug")
+            or slugify(request.data.get("name") or template.name)[:80],
+            "description": request.data.get("description") or template.description,
+            "is_active": request.data.get("is_active", True),
+            "sort_order": request.data.get("sort_order", 0),
+            "reporting_category": (
+                request.data.get("reporting_category") or template.reporting_category
+            ),
+        }
+        skill_keys = request.data.get("skill_keys") or list(template.suggested_skill_keys)
+        skills = list(Skill.objects.filter(key__in=skill_keys, is_active=True))
+        by_key = {s.key: s for s in skills}
+        skill_ids = [str(by_key[k].id) for k in skill_keys if k in by_key]
+        missing_keys = [k for k in skill_keys if k not in by_key]
+
+        serializer = ServiceOfferingWriteSerializer(
+            data={**payload, "skill_ids": skill_ids},
+            context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        fresh = self.get_queryset().get(pk=serializer.instance.pk)
+        read = ServiceOfferingSerializer(fresh, context=self.get_serializer_context())
+        return Response(
+            {
+                "service_offering": read.data,
+                "template_key": template.key,
+                "unresolved_skill_keys": missing_keys,
+            },
+            status=status.HTTP_201_CREATED,
+        )

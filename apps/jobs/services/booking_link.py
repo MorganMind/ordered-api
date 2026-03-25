@@ -47,7 +47,11 @@ def ensure_booking_for_job(job, *, actor, request=None):
     if sr is None and job.service_request_id:
         from apps.service_requests.models import ServiceRequest
 
-        sr = ServiceRequest.objects.filter(pk=job.service_request_id).first()
+        sr = (
+            ServiceRequest.objects.select_related("service_offering")
+            .filter(pk=job.service_request_id)
+            .first()
+        )
     if sr is None:
         raise ValidationError(
             {
@@ -58,7 +62,7 @@ def ensure_booking_for_job(job, *, actor, request=None):
             }
         )
 
-    title = (job.title or f"{sr.service_type} — {sr.contact_name}")[:255]
+    title = (job.title or f"{sr.service_display_label} — {sr.contact_name}")[:255]
     booking = Booking.objects.create(
         tenant_id=job.tenant_id,
         title=title,

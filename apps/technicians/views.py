@@ -39,6 +39,10 @@ from apps.technicians.models import (
     ONBOARDING_REQUIREMENTS,
 )
 from apps.technicians.application_emails import notify_application_submitted
+from apps.technicians.form_template_library import (
+    get_form_template,
+    list_form_templates,
+)
 from apps.technicians.serializers import (
     ApplicationFormCreateSerializer,
     ApplicationFormDetailSerializer,
@@ -580,6 +584,64 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
             created_by=str(self.request.user.id),
             field_count=serializer.instance.fields.count(),
         )
+
+    def _create_form_via_serializer(self, payload: dict):
+        serializer = ApplicationFormCreateSerializer(
+            data=payload,
+            context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        form = self.get_queryset().get(pk=serializer.instance.pk)
+        return ApplicationFormDetailSerializer(form).data
+
+    @action(detail=False, methods=["get"], url_path="templates")
+    def templates(self, request):
+        return Response({"templates": list_form_templates()})
+
+    @action(detail=False, methods=["post"], url_path="from-template")
+    def from_template(self, request):
+        template_key = str(request.data.get("template_key") or "").strip()
+        template = get_form_template(template_key)
+        if template is None:
+            return Response(
+                {"detail": f"Unknown template_key '{template_key}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = {
+            "title": request.data.get("title") or template["default_title"],
+            "description": (
+                request.data.get("description")
+                or template["default_form_description"]
+            ),
+            "status": request.data.get("status", ApplicationFormStatus.DRAFT),
+            "settings": request.data.get("settings", {}),
+            "fields_schema": request.data.get("fields_schema")
+            or template["fields_schema"],
+        }
+        slug = request.data.get("slug")
+        if slug:
+            payload["slug"] = slug
+        data = self._create_form_via_serializer(payload)
+        return Response(
+            {"form": data, "template_key": template["key"]},
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="from-scratch")
+    def from_scratch(self, request):
+        payload = {
+            "title": request.data.get("title"),
+            "description": request.data.get("description", ""),
+            "status": request.data.get("status", ApplicationFormStatus.DRAFT),
+            "settings": request.data.get("settings", {}),
+            "fields_schema": request.data.get("fields_schema", []),
+        }
+        slug = request.data.get("slug")
+        if slug:
+            payload["slug"] = slug
+        data = self._create_form_via_serializer(payload)
+        return Response({"form": data, "source": "scratch"}, status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
         if instance.status != ApplicationFormStatus.DRAFT:
@@ -1210,7 +1272,11 @@ class ApplicationFormPublicSubmitView(APIView):
 
     def get(self, request, form_id):
         try:
-            form = ApplicationForm.objects.prefetch_related("fields").get(id=form_id)
+            form = (
+                ApplicationForm.objects.select_related("tenant")
+                .prefetch_related("fields")
+                .get(id=form_id)
+            )
         except ApplicationForm.DoesNotExist:
             return Response(
                 {

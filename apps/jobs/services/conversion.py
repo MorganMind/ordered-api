@@ -19,7 +19,7 @@ def convert_service_request_to_job(
 ) -> Job:
     job = Job.objects.create(
         tenant_id=sr.tenant_id,
-        title=title or f"{sr.service_type} — {sr.contact_name}",
+        title=title or f"{sr.service_display_label} — {sr.contact_name}",
         status=JobStatus.OPEN,
         service_request=sr,
         created_by=actor,

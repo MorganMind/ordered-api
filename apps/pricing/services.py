@@ -11,6 +11,9 @@ from apps.service_requests.models import ServiceRequest
 def service_request_pricing_inputs(sr: ServiceRequest) -> Dict[str, Any]:
     return {
         "service_type": sr.service_type,
+        "service_offering_id": (
+            str(sr.service_offering_id) if sr.service_offering_id else None
+        ),
         "square_feet": sr.square_feet,
         "bedrooms": sr.bedrooms,
         "bathrooms": float(sr.bathrooms) if sr.bathrooms is not None else None,

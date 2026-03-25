@@ -1,6 +1,29 @@
 from django.contrib import admin
 
-from .models import ServiceRequest
+from .models import ServiceOffering, ServiceOfferingSkill, ServiceRequest
+
+
+class ServiceOfferingSkillInline(admin.TabularInline):
+    model = ServiceOfferingSkill
+    extra = 0
+    raw_id_fields = ("skill",)
+
+
+@admin.register(ServiceOffering)
+class ServiceOfferingAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "slug",
+        "tenant",
+        "is_active",
+        "sort_order",
+        "reporting_category",
+        "created_at",
+    )
+    list_filter = ("is_active", "tenant", "reporting_category")
+    search_fields = ("name", "slug", "description")
+    prepopulated_fields = {"slug": ("name",)}
+    inlines = [ServiceOfferingSkillInline]
 
 
 @admin.register(ServiceRequest)
@@ -61,7 +84,15 @@ class ServiceRequestAdmin(admin.ModelAdmin):
         ),
         (
             "Service Details",
-            {"fields": ("service_type", "timing_preference", "notes", "media_refs")},
+            {
+                "fields": (
+                    "service_type",
+                    "service_offering",
+                    "timing_preference",
+                    "notes",
+                    "media_refs",
+                )
+            },
         ),
         (
             "Operator",

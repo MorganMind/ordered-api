@@ -28,6 +28,11 @@ def service_request_created_audit(
         entity_id=instance.id,
         payload={
             "service_type": instance.service_type,
+            "service_offering_id": (
+                str(instance.service_offering_id)
+                if instance.service_offering_id
+                else None
+            ),
             "status": instance.status,
             "source": instance.source,
         },

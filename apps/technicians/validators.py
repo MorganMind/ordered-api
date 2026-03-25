@@ -66,6 +66,14 @@ def _validate_single_field(
     required = field_def.get("required", False)
     validations = field_def.get("validations") or {}
 
+    # Optional numeric fields: treat 0 / "0" as empty (clients often send this
+    # when the user skips a non-required number).
+    if not required and field_type in (FormFieldType.NUMBER, "number"):
+        if value in (0, 0.0):
+            return []
+        if isinstance(value, str) and value.strip() in ("", "0", "0.0"):
+            return []
+
     if _is_empty(value):
         if required and not partial:
             errors.append("This field is required.")
@@ -104,6 +112,12 @@ def _validate_text(value: Any, field_def: dict, validations: dict) -> list[str]:
 
 
 def _validate_textarea(value: Any, field_def: dict, validations: dict) -> list[str]:
+    if isinstance(value, bool):
+        return ["Expected a text value."]
+    if isinstance(value, (int, float)):
+        value = str(value)
+    elif not isinstance(value, str):
+        return ["Expected a text value."]
     return _validate_text(value, field_def, validations)
 
 

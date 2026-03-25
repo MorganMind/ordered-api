@@ -446,3 +446,33 @@ class TestMixedValidation(SimpleTestCase):
         self.assertIn("full_name", errors)
         self.assertIn("email", errors)
         self.assertIn("service_type", errors)
+
+
+class TestOptionalNumberAndTextCoercion(SimpleTestCase):
+    """Guards common client payloads (0 for optional hours; numeric text blobs)."""
+
+    def test_optional_number_zero_treated_as_empty(self):
+        fields = [
+            _field(
+                "hours",
+                "number",
+                required=False,
+                validations={"min_value": 1, "max_value": 80},
+            )
+        ]
+        self.assertEqual(validate_answers_against_schema(fields, {"hours": 0}), {})
+        self.assertEqual(validate_answers_against_schema(fields, {"hours": "0"}), {})
+
+    def test_textarea_accepts_numeric_stringified(self):
+        fields = [
+            _field(
+                "experience_summary",
+                "textarea",
+                required=True,
+                validations={"min_length": 5},
+            )
+        ]
+        self.assertEqual(
+            validate_answers_against_schema(fields, {"experience_summary": 12345}),
+            {},
+        )
