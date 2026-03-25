@@ -1,6 +1,6 @@
 # Technician application emails — frontend notes
 
-When someone submits a **public** application (`POST /api/v1/forms/{formId}/apply/` or legacy `POST /api/v1/tenants/{tenantId}/apply/`), the API sends:
+When someone submits a **public** application (`POST /api/v1/forms/{formRef}/apply/` where `formRef` is **`apply_slug`** or legacy UUID, or legacy `POST /api/v1/tenants/{tenantId}/apply/`), the API sends:
 
 1. **Applicant** — HTML + plain text to the email they entered.
 2. **Operator** — HTML + plain text to the tenant’s **`operator_admin_email`**, if that field is set.

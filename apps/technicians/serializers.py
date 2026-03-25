@@ -544,6 +544,7 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
         model = ApplicationForm
         fields = [
             "id",
+            "apply_slug",
             "title",
             "slug",
             "description",
@@ -556,6 +557,7 @@ class ApplicationFormListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "apply_slug",
             "is_accepting_submissions",
             "application_count",
             "field_count",
@@ -595,6 +597,7 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
         model = ApplicationForm
         fields = [
             "id",
+            "apply_slug",
             "title",
             "slug",
             "description",
@@ -611,6 +614,7 @@ class ApplicationFormDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "apply_slug",
             "is_accepting_submissions",
             "application_count",
             "status_counts",
@@ -651,6 +655,7 @@ class ApplicationFormCreateSerializer(serializers.ModelSerializer):
         model = ApplicationForm
         fields = [
             "id",
+            "apply_slug",
             "title",
             "slug",
             "description",
@@ -660,7 +665,7 @@ class ApplicationFormCreateSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "apply_slug", "created_at", "updated_at"]
 
     def validate_slug(self, value):
         if not value:
@@ -724,6 +729,7 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApplicationForm
         fields = [
+            "apply_slug",
             "title",
             "slug",
             "description",
@@ -731,6 +737,7 @@ class ApplicationFormUpdateSerializer(serializers.ModelSerializer):
             "settings",
             "fields_schema",
         ]
+        read_only_fields = ["apply_slug"]
 
     def validate_slug(self, value):
         if not value:
@@ -845,6 +852,7 @@ class ApplicationFormPublicSerializer(serializers.ModelSerializer):
         model = ApplicationForm
         fields = [
             "id",
+            "apply_slug",
             "title",
             "description",
             "fields_schema",
@@ -852,6 +860,7 @@ class ApplicationFormPublicSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "apply_slug",
             "title",
             "description",
             "fields_schema",

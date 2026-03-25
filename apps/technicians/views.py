@@ -519,7 +519,7 @@ class ApplicationFormViewSet(viewsets.ModelViewSet):
     filterset_fields = {
         "status": ["exact", "in"],
     }
-    search_fields = ["title", "slug", "description"]
+    search_fields = ["title", "slug", "apply_slug", "description"]
     ordering_fields = ["created_at", "updated_at", "title"]
     ordering = ["-created_at"]
 
@@ -1262,22 +1262,19 @@ class TechnicianApplicationPublicSubmitView(APIView):
 
 class ApplicationFormPublicSubmitView(APIView):
     """
-    GET /api/v1/forms/{form_id}/apply/ — public form schema (no auth).
+    GET /api/v1/forms/{form_ref}/apply/ — public form schema (no auth).
 
-    POST /api/v1/forms/{form_id}/apply/ — submit against the form; tenant from form.
+    POST /api/v1/forms/{form_ref}/apply/ — submit against the form; tenant from form.
+
+    ``form_ref`` is the short ``apply_slug`` (preferred) or legacy UUID primary key.
     """
 
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    def get(self, request, form_id):
-        try:
-            form = (
-                ApplicationForm.objects.select_related("tenant")
-                .prefetch_related("fields")
-                .get(id=form_id)
-            )
-        except ApplicationForm.DoesNotExist:
+    def get(self, request, form_ref):
+        form = ApplicationForm.get_for_public_apply(form_ref)
+        if form is None:
             return Response(
                 {
                     "error": {
@@ -1317,12 +1314,9 @@ class ApplicationFormPublicSubmitView(APIView):
         serializer = ApplicationFormPublicSerializer(form)
         return Response(serializer.data)
 
-    def post(self, request, form_id):
-        try:
-            form = ApplicationForm.objects.select_related("tenant").prefetch_related(
-                "fields"
-            ).get(id=form_id)
-        except ApplicationForm.DoesNotExist:
+    def post(self, request, form_ref):
+        form = ApplicationForm.get_for_public_apply(form_ref)
+        if form is None:
             return Response(
                 {
                     "error": {

@@ -127,7 +127,7 @@ urlpatterns = [
     path("technicians/onboarding-requirements/", OnboardingRequirementsView.as_view(), name="onboarding-requirements"),
 
     path(
-        "forms/<uuid:form_id>/apply/",
+        "forms/<str:form_ref>/apply/",
         ApplicationFormPublicSubmitView.as_view(),
         name="public-form-apply",
     ),

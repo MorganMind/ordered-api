@@ -93,6 +93,8 @@ class TestApplicationFormFieldsAPI(TestCase):
 
         form = ApplicationForm.objects.get(id=resp.data["id"])
         self.assertEqual(form.fields.count(), 5)
+        self.assertEqual(resp.data.get("apply_slug"), form.apply_slug)
+        self.assertEqual(len(form.apply_slug), 10)
         self.assertEqual(form.fields.filter(required=True).count(), 3)
 
     def test_create_form_without_fields(self):
@@ -321,7 +323,7 @@ class TestApplicationFormFieldsAPI(TestCase):
 
 
 class TestPublicFormSubmissionWithCustomFields(TestCase):
-    """Public GET/POST ``/api/v1/forms/{id}/apply/``."""
+    """Public GET/POST ``/api/v1/forms/{apply_slug}/apply/`` (UUID still accepted)."""
 
     def setUp(self):
         self.tenant = Tenant.objects.create(
@@ -368,9 +370,10 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
         )
 
         self.client = APIClient()
+        self.form.refresh_from_db()
 
     def _url(self):
-        return f"/api/v1/forms/{self.form.id}/apply/"
+        return f"/api/v1/forms/{self.form.apply_slug}/apply/"
 
     def test_get_returns_form_schema(self):
         resp = self.client.get(self._url())
@@ -380,6 +383,7 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
         keys = [f["field_key"] for f in resp.data["fields_schema"]]
         self.assertEqual(keys, ["full_name", "service_type", "available"])
         self.assertIn("public_branding", resp.data)
+        self.assertEqual(resp.data.get("apply_slug"), self.form.apply_slug)
         self.assertEqual(resp.data["public_branding"]["name"], self.tenant.name)
         self.assertEqual(
             resp.data["public_branding"]["logo_url"],
@@ -453,7 +457,8 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
             slug="no-fields",
             status=ApplicationFormStatus.ACTIVE,
         )
-        url = f"/api/v1/forms/{empty_form.id}/apply/"
+        empty_form.refresh_from_db()
+        url = f"/api/v1/forms/{empty_form.apply_slug}/apply/"
         data = {
             "first_name": "Frank",
             "email": "frank@example.com",
@@ -478,3 +483,25 @@ class TestPublicFormSubmissionWithCustomFields(TestCase):
         self.assertGreater(app.schema_version, 0)
         self.assertIn("field_schema_snapshot", app.metadata)
         self.assertEqual(len(app.metadata["field_schema_snapshot"]), 3)
+
+    def test_public_apply_accepts_legacy_uuid_in_path(self):
+        url = f"/api/v1/forms/{self.form.id}/apply/"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data.get("apply_slug"), self.form.apply_slug)
+
+    def test_public_apply_nonexistent_uuid_returns_404(self):
+        resp = self.client.get(
+            "/api/v1/forms/00000000-0000-4000-8000-000000000099/apply/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_public_apply_slug_too_long_returns_404(self):
+        resp = self.client.get(
+            "/api/v1/forms/abcdefghijklmnopqrstu/apply/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_public_apply_invalid_characters_in_ref_returns_404(self):
+        resp = self.client.get("/api/v1/forms/bad!slug/apply/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)

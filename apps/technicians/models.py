@@ -11,6 +11,9 @@ Onboarding states:
     active             - approved by admin, can see/claim/execute jobs
     suspended          - blocked from all job operations by admin
 """
+from __future__ import annotations
+
+import secrets
 import uuid
 from typing import TYPE_CHECKING
 
@@ -408,6 +411,21 @@ class FormFieldType(models.TextChoices):
     FILE_UPLOAD = "file_upload", "File Upload"
 
 
+_APPLY_SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+_APPLY_SLUG_LENGTH = 10
+
+
+def _generate_unique_apply_slug(model_cls: type[ApplicationForm]) -> str:
+    """Random globally unique segment for public ``/forms/<apply_slug>/apply/`` URLs."""
+    for _ in range(128):
+        candidate = "".join(
+            secrets.choice(_APPLY_SLUG_ALPHABET) for _ in range(_APPLY_SLUG_LENGTH)
+        )
+        if not model_cls.objects.filter(apply_slug=candidate).exists():
+            return candidate
+    raise RuntimeError("Could not allocate a unique apply_slug")
+
+
 class ApplicationForm(models.Model):
     """
     A tenant-scoped application form definition.
@@ -419,11 +437,18 @@ class ApplicationForm(models.Model):
     columns on ``TechnicianApplication`` cover core identity and structured
     blocks (service area, availability, etc.).
 
-    Public submissions target a specific form via its ID, which resolves
-    the owning tenant automatically.
+    Public submissions target a specific form via ``apply_slug`` (short random
+    id) or legacy UUID primary key; either resolves the owning tenant.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    apply_slug = models.CharField(
+        max_length=16,
+        unique=True,
+        editable=False,
+        help_text="Short random public URL segment for /forms/.../apply/ (set automatically).",
+    )
 
     tenant = models.ForeignKey(
         "tenants.Tenant",
@@ -483,6 +508,34 @@ class ApplicationForm(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.get_status_display()})"
+
+    def save(self, *args, **kwargs):
+        if not self.apply_slug:
+            self.apply_slug = _generate_unique_apply_slug(type(self))
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_for_public_apply(cls, form_ref: str) -> ApplicationForm | None:
+        """
+        Load a form for the public apply endpoint (tenant + fields prefetched).
+
+        Accepts ``apply_slug`` (short lowercase alphanumeric) or legacy UUID
+        primary key string.
+        """
+        raw = (form_ref or "").strip()
+        if not raw:
+            return None
+        qs = cls.objects.select_related("tenant").prefetch_related("fields")
+        try:
+            uid = uuid.UUID(raw)
+        except (ValueError, AttributeError, TypeError):
+            uid = None
+        if uid is not None:
+            return qs.filter(pk=uid).first()
+        slug = raw.lower()
+        if len(slug) > 16 or any(c not in _APPLY_SLUG_ALPHABET for c in slug):
+            return None
+        return qs.filter(apply_slug=slug).first()
 
     @property
     def is_accepting_submissions(self) -> bool:

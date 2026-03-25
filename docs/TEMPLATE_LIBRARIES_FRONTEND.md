@@ -136,11 +136,36 @@ Body example:
 
 ---
 
+## Public application form URLs (`apply_slug`)
+
+Public endpoints are **unauthenticated**:
+
+| Action | Request |
+|--------|---------|
+| Load schema | `GET /api/v1/forms/{form_ref}/apply/` |
+| Submit | `POST /api/v1/forms/{form_ref}/apply/` |
+
+**Use `form_ref` = `apply_slug`** — a **10-character** string (`a`–`z`, `0`–`9`), **globally unique**, returned on every form from the admin API:
+
+- `GET /api/v1/admin/application-forms/` (list)
+- `GET /api/v1/admin/application-forms/{id}/` (detail)
+- `POST` / `PATCH` responses when creating or updating a form
+
+The public **GET** schema response also includes `apply_slug` so a client loaded by UUID can normalize or display the short link.
+
+**Frontend routing:** Map a short applicant URL (e.g. `/apply/{apply_slug}`) to API calls using that same `{apply_slug}` as `{form_ref}`.
+
+**Backward compatibility:** `{form_ref}` may still be the form’s **UUID** (primary key). Prefer **`apply_slug`** for all new share links and QR codes.
+
+**Operator admin** still uses **UUID `id`** for `/api/v1/admin/application-forms/{id}/` — only the **public** `/forms/.../apply/` path uses the short slug.
+
+---
+
 ## Cleaning template fields included
 
 Template key: `cleaning_technician_intake_v1`
 
-**Built-in fields** on `POST /forms/{id}/apply/` (not in `fields_schema`): **name, email, phone**, and **applicant type** — do not duplicate those as custom questions.
+**Built-in fields** on `POST /api/v1/forms/{apply_slug}/apply/` (not in `fields_schema`): **name, email, phone**, and **applicant type** — do not duplicate those as custom questions.
 
 Applicant-facing `fields_schema` in this template:
 
