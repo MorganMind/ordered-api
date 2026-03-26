@@ -40,6 +40,20 @@ class TenantMeLogoAPITests(TestCase):
         self.tenant.refresh_from_db()
         self.assertEqual(self.tenant.logo_url, url)
 
+    def test_patch_rejects_localhost_logo_url(self):
+        url = "https://localhost:8000/media/tenant_logos/x.png"
+        r = self.client.patch(self.me_url, {"logo_url": url}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.tenant.refresh_from_db()
+        self.assertIsNone(self.tenant.logo_url)
+
+    def test_patch_rejects_private_ip_logo_url(self):
+        url = "http://192.168.1.33/media/tenant_logos/x.png"
+        r = self.client.patch(self.me_url, {"logo_url": url}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.tenant.refresh_from_db()
+        self.assertIsNone(self.tenant.logo_url)
+
     def test_post_multipart_logo(self):
         png = (
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"

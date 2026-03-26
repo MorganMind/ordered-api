@@ -1,8 +1,9 @@
 """
 Tenant serializers.
 """
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-from .models import Tenant
+from .models import Tenant, validate_public_logo_url
 
 
 class TenantSerializer(serializers.ModelSerializer):
@@ -52,6 +53,10 @@ class TenantMePatchSerializer(serializers.ModelSerializer):
     def validate_logo_url(self, value):
         if value is None or (isinstance(value, str) and not value.strip()):
             return None
+        try:
+            validate_public_logo_url(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(str(exc))
         return value
 
 

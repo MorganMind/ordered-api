@@ -1,6 +1,9 @@
 """
 Tenant model - represents a business/operation using Ordered.
 """
+import ipaddress
+from urllib.parse import urlparse
+
 from django.db import models
 from django.core.exceptions import ValidationError
 from apps.core.models import BaseModel
@@ -13,6 +16,36 @@ def validate_timezone(value):
         ZoneInfo(value)
     except KeyError:
         raise ValidationError(f"'{value}' is not a valid timezone.")
+
+
+def validate_public_logo_url(value):
+    """
+    Reject localhost/private-network URLs for tenant logo storage.
+    """
+    if not value:
+        return
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        raise ValidationError(
+            "Logo URL must be publicly reachable; localhost URLs are not allowed."
+        )
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+    ):
+        raise ValidationError(
+            "Logo URL must be publicly reachable; private network addresses are not allowed."
+        )
 
 
 class TenantStatus(models.TextChoices):
@@ -79,3 +112,4 @@ class Tenant(BaseModel):
         super().clean()
         # Validate timezone on clean
         validate_timezone(self.timezone)
+        validate_public_logo_url(self.logo_url)
